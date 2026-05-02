@@ -474,6 +474,41 @@ def request_payout():
     data['payouts'].append(payout)
     data['transactions'].append({'type': 'payout_request', 'payout_id': payout['id'], 'user': user_address, 'amount': payout['amount'], 'timestamp': int(time.time() * 1000)})
     save_data(data)
+
+    # Attempt automatic payout via configured signer service
+    signer_url = os.environ.get('PAYOUT_SIGNER_URL')
+    auto_send = os.environ.get('AUTO_SEND_PAYOUTS', 'false').lower() == 'true'
+    if signer_url:
+        try:
+            import urllib.request
+            payload = json.dumps({'to': payout['to_address'], 'amount': payout['amount'], 'payout_id': payout['id']}).encode('utf-8')
+            req = urllib.request.Request(signer_url, data=payload, headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                res = json.loads(resp.read())
+            # signer returns { tx_hash } on success or { status: 'pending' } or { error }
+            if res.get('tx_hash'):
+                payout['status'] = 'sent'
+                payout['tx_hash'] = res.get('tx_hash')
+                payout['sent_at'] = int(time.time() * 1000)
+                payout['approved_by'] = 'auto'
+                payout['approved_at'] = int(time.time() * 1000)
+                data['transactions'].append({'type': 'payout_sent', 'payout_id': payout['id'], 'tx_hash': payout['tx_hash'], 'timestamp': int(time.time() * 1000)})
+            else:
+                # keep pending if signer returns pending, otherwise record error
+                if res.get('status') == 'pending':
+                    payout['status'] = 'pending'
+                else:
+                    payout['status'] = 'error'
+                    payout['error'] = res.get('error', 'no tx_hash returned by signer')
+        except Exception as e:
+            payout['status'] = 'error'
+            payout['error'] = str(e)
+        save_data(data)
+    elif auto_send:
+        # auto_send requested but no signer configured — leave as pending but log
+        payout['status'] = 'pending'
+        save_data(data)
+
     return jsonify({'ok': True, 'payout': payout})
 
 
@@ -519,6 +554,42 @@ def approve_payout(payout_id):
             payout['error'] = str(e)
         save_data(data)
 
+    return jsonify({'ok': True, 'payout': payout})
+
+
+@app.route('/api/payouts/callback', methods=['POST'])
+def payout_callback():
+    """Callback endpoint for external signer to report status of payout.
+    Expected body: { payout_id, status, tx_hash?, error? }
+    """
+    data = load_data()
+    body = request.json or {}
+    payout_id = body.get('payout_id')
+    status = body.get('status')
+    tx_hash = body.get('tx_hash')
+    error = body.get('error')
+
+    payout = next((p for p in data.get('payouts', []) if p['id'] == payout_id), None)
+    if not payout:
+        return jsonify({'error': 'Payout not found'}), 404
+
+    if status == 'sent':
+        payout['status'] = 'sent'
+        payout['tx_hash'] = tx_hash or payout.get('tx_hash')
+        payout['sent_at'] = int(time.time() * 1000)
+        data['transactions'].append({'type': 'payout_sent', 'payout_id': payout['id'], 'tx_hash': payout['tx_hash'], 'timestamp': int(time.time() * 1000)})
+    elif status == 'completed':
+        payout['status'] = 'completed'
+        payout['tx_hash'] = tx_hash or payout.get('tx_hash')
+        payout['completed_at'] = int(time.time() * 1000)
+        data['transactions'].append({'type': 'payout_completed', 'payout_id': payout['id'], 'tx_hash': payout['tx_hash'], 'timestamp': int(time.time() * 1000)})
+    elif status == 'error':
+        payout['status'] = 'error'
+        payout['error'] = error or 'unknown error'
+    else:
+        payout['status'] = status or payout.get('status')
+
+    save_data(data)
     return jsonify({'ok': True, 'payout': payout})
 
 
@@ -617,6 +688,44 @@ def request_deposit():
     data['deposits'].append(deposit)
     data['transactions'].append({'type': 'deposit_request', 'deposit_id': deposit['id'], 'user': user_address, 'amount': deposit['amount'], 'timestamp': int(time.time() * 1000)})
     save_data(data)
+    # Try automatic verification if a verifier is configured or AUTO_APPROVE_DEPOSITS is enabled
+    verifier = os.environ.get('DEPOSIT_VERIFIER_URL')
+    auto_approve = os.environ.get('AUTO_APPROVE_DEPOSITS', 'false').lower() == 'true'
+    if verifier and tx_hash:
+        try:
+            import urllib.request
+            payload = json.dumps({'tx_hash': tx_hash}).encode('utf-8')
+            req = urllib.request.Request(verifier, data=payload, headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                res = json.loads(resp.read())
+            # expected { valid: bool, to: address, amount: number }
+            if res.get('valid'):
+                # ensure funds went to treasury and amounts match
+                to_addr = res.get('to')
+                verified_amount = float(res.get('amount', 0))
+                if to_addr and to_addr == (deposit['to_address'] or TREASURY_WALLET) and verified_amount >= deposit['amount']:
+                    ensure_user(data, deposit['user_address'])
+                    data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + deposit['amount'], 8)
+                    deposit['status'] = 'approved'
+                    deposit['approved_by'] = 'auto'
+                    deposit['approved_at'] = int(time.time() * 1000)
+                    data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': deposit['amount'], 'timestamp': int(time.time() * 1000)})
+                else:
+                    deposit['status'] = 'rejected'
+                    deposit['rejection_reason'] = 'verification failed (to/amount mismatch)'
+        except Exception as e:
+            deposit['status'] = 'pending'
+            deposit['note'] = f'verifier error: {e}'
+        save_data(data)
+    elif auto_approve:
+        ensure_user(data, deposit['user_address'])
+        data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + deposit['amount'], 8)
+        deposit['status'] = 'approved'
+        deposit['approved_by'] = 'auto'
+        deposit['approved_at'] = int(time.time() * 1000)
+        data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': deposit['amount'], 'timestamp': int(time.time() * 1000)})
+        save_data(data)
+
     return jsonify({'ok': True, 'deposit': deposit})
 
 
@@ -664,6 +773,38 @@ def reject_deposit(deposit_id):
     deposit['rejected_at'] = int(time.time() * 1000)
     deposit['rejection_reason'] = reason
     data['transactions'].append({'type': 'deposit_rejected', 'deposit_id': deposit['id'], 'timestamp': int(time.time() * 1000)})
+    save_data(data)
+    return jsonify({'ok': True, 'deposit': deposit})
+
+
+@app.route('/api/deposits/callback', methods=['POST'])
+def deposit_callback():
+    """Callback endpoint for external verifier to mark deposits approved/rejected.
+    Expected body: { deposit_id, valid: bool, to?, amount?, error? }
+    """
+    data = load_data()
+    body = request.json or {}
+    deposit_id = body.get('deposit_id')
+    valid = body.get('valid')
+    to = body.get('to')
+    amount = body.get('amount')
+    error = body.get('error')
+
+    deposit = next((d for d in data.get('deposits', []) if d['id'] == deposit_id), None)
+    if not deposit:
+        return jsonify({'error': 'Deposit not found'}), 404
+
+    if valid:
+        ensure_user(data, deposit['user_address'])
+        data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + deposit['amount'], 8)
+        deposit['status'] = 'approved'
+        deposit['approved_by'] = 'verifier'
+        deposit['approved_at'] = int(time.time() * 1000)
+        data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': deposit['amount'], 'timestamp': int(time.time() * 1000)})
+    else:
+        deposit['status'] = 'rejected'
+        deposit['rejection_reason'] = error or 'verification failed'
+
     save_data(data)
     return jsonify({'ok': True, 'deposit': deposit})
 

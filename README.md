@@ -120,6 +120,55 @@ Action: create and sign internal message, broadcast via TON RPC/toncenter, retur
 
 Если хотите, могу добавить пример простого signer‑сервиса на Node.js с использованием `tonweb`/`ton` SDK и инструкцией по хранению seed в Render Secrets или HashiCorp Vault.
 
+## 🧠 Автоматизация выплат и верификации (Signer & Verifier)
+
+Этот проект поддерживает автоматическую обработку выплат и автоматическую верификацию депозитов через внешние сервисы. Ниже — шаги и примеры для быстрого запуска и для production.
+
+Переменные окружения (Render Secrets):
+- `PAYOUT_SIGNER_URL` — URL signer‑сервиса, который подписывает и отправляет транзакции. Метод: `POST { to, amount, payout_id }` → ответ `{ tx_hash }`.
+- `DEPOSIT_VERIFIER_URL` — URL сервиса, проверяющего tx_hash. Метод: `POST { tx_hash }` → ответ `{ valid: true|false, to: address, amount: number }`.
+- `AUTO_APPROVE_DEPOSITS` — если `true`, заявки на депозиты будут автоматически подтверждаться (небезопасно для production без verifier).
+- `AUTO_SEND_PAYOUTS` — если `true` и `PAYOUT_SIGNER_URL` не задан, система оставит заявки на отправку в `pending` (логируется); желательно всегда указывать `PAYOUT_SIGNER_URL`.
+
+Локальный быстрый запуск (mock signer):
+
+1) Запустить mock signer (для тестов):
+
+```bash
+cd tools/mock-signer
+npm install
+npm start
+# mock signer будет слушать http://localhost:3001/sign
+```
+
+2) Запустить backend окружение с автоматической отправкой на mock signer:
+
+```bash
+PAYOUT_SIGNER_URL=http://localhost:3001/sign \
+AUTO_SEND_PAYOUTS=true \
+.venv/bin/python backend/app.py
+```
+
+3) Пример запроса на выплату (автообработка):
+
+```bash
+curl -X POST https://bet-ton.onrender.com/api/payouts/request \
+  -H 'Content-Type: application/json' \
+  -d '{"user_address":"<USER_ADDR>","to_address":"<DEST_ADDR>","amount":1.5}'
+```
+
+При удачном ответе mock signer вернёт `{ tx_hash }` и payout пометится как `sent`.
+
+Production рекомендации:
+- Разверните signer как отдельный защищённый сервис (Render Web Service, Heroku, VPS). Храните приватный ключ/seed только в Render Secrets или в Vault/HSM.
+- Signer должен проверять входящие запросы (подпись, IP allowlist, auth token). Возвращать `{ tx_hash }` или ошибки.
+- Для безопасности депозитов используйте `DEPOSIT_VERIFIER_URL`, который опрашивает TON RPC/TonCenter и валидирует `tx_hash` (to == `TREASURY_WALLET` и amount >= заявленной суммы).
+
+Если хотите, могу:
+- A) Добавить пример real signer на Node.js с `ton`/`tonweb` (создание и отправка internal message),
+- B) Настроить и задеплоить mock signer на Render для быстрого старта, или
+- C) Добавить verifier пример (Python script) который вызывает TonCenter API по `tx_hash`.
+
 ## 💳 Пополнение баланса (депозиты)
 
 1) Быстрый рабочий процесс (ручной):
