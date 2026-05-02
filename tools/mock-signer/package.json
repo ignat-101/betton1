@@ -1,13 +1,25 @@
 {
-  "name": "mock-signer",
+  "name": "ton-real-signer",
   "version": "1.0.0",
-  "description": "Mock signer for testing payouts (DO NOT USE IN PRODUCTION)",
+  "description": "Real TON signer for betton payouts - KEEP PRIVATE!",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "dev": "ts-node index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "body-parser": "^1.20.2"
+    "@ton/ton": "^13.5.1",
+    "@ton/crypto": "^3.0.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "body-parser": "^1.20.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/body-parser": "^1.19.5",
+    "@types/node": "^22.7.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
   }
 }
