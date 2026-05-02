@@ -27,6 +27,7 @@ def load_data():
         'disputes': [],
         # payouts: withdrawal requests and their states
         'payouts': [],
+        'deposits': [],
         # stakes: mapping address -> staked_amount (platform-internal staking pool)
         'stakes': {},
         'stake_transactions': []
@@ -563,6 +564,108 @@ def cancel_payout(payout_id):
     data['transactions'].append({'type': 'payout_cancelled', 'payout_id': payout['id'], 'timestamp': int(time.time() * 1000)})
     save_data(data)
     return jsonify({'ok': True, 'payout': payout})
+
+
+@app.route('/.well-known/ton-connect.json', methods=['GET'])
+def tonconnect_manifest():
+    # Minimal TonConnect manifest — adjust icons/homepage as needed
+    manifest = {
+        'name': 'TON FlashBet',
+        'description': 'FlashBet — ставки на TON',
+        'homepage': 'https://bet-ton.onrender.com',
+        'icons': [f'https://bet-ton.onrender.com/logo192.png'],
+        'redirect': {'login': 'https://bet-ton.onrender.com'}
+    }
+    return jsonify(manifest)
+
+
+@app.route('/api/deposits', methods=['GET'])
+def list_deposits():
+    data = load_data()
+    user = request.args.get('user')
+    deposits = data.get('deposits', [])
+    if user:
+        deposits = [d for d in deposits if d.get('user_address') == user]
+    return jsonify({'deposits': deposits})
+
+
+@app.route('/api/deposits/request', methods=['POST'])
+def request_deposit():
+    data = load_data()
+    body = request.json or {}
+    user_address = body.get('user_address')
+    tx_hash = body.get('tx_hash')
+    amount = float(body.get('amount', 0))
+    to_address = body.get('to_address')
+
+    if not user_address or amount <= 0:
+        return jsonify({'error': 'Invalid deposit request'}), 400
+
+    deposit = {
+        'id': secrets.token_hex(8),
+        'user_address': user_address,
+        'to_address': to_address or TREASURY_WALLET,
+        'tx_hash': tx_hash,
+        'amount': round(amount, 8),
+        'status': 'pending',
+        'created_at': int(time.time() * 1000),
+        'approved_by': None,
+        'approved_at': None,
+        'rejected_at': None,
+        'note': body.get('note', '')
+    }
+    data['deposits'].append(deposit)
+    data['transactions'].append({'type': 'deposit_request', 'deposit_id': deposit['id'], 'user': user_address, 'amount': deposit['amount'], 'timestamp': int(time.time() * 1000)})
+    save_data(data)
+    return jsonify({'ok': True, 'deposit': deposit})
+
+
+@app.route('/api/deposits/<deposit_id>/approve', methods=['POST'])
+def approve_deposit(deposit_id):
+    data = load_data()
+    body = request.json or {}
+    admin_address = body.get('admin_address', '')
+    if admin_address != ADMIN_WALLET:
+        return jsonify({'error': 'Unauthorized. Admin only.'}), 403
+
+    deposit = next((d for d in data.get('deposits', []) if d['id'] == deposit_id), None)
+    if not deposit:
+        return jsonify({'error': 'Deposit not found'}), 404
+    if deposit['status'] != 'pending':
+        return jsonify({'error': 'Deposit not pending'}), 400
+
+    # Credit user balance
+    ensure_user(data, deposit['user_address'])
+    data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + deposit['amount'], 8)
+    deposit['status'] = 'approved'
+    deposit['approved_by'] = admin_address
+    deposit['approved_at'] = int(time.time() * 1000)
+    data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': deposit['amount'], 'timestamp': int(time.time() * 1000)})
+    save_data(data)
+    return jsonify({'ok': True, 'deposit': deposit})
+
+
+@app.route('/api/deposits/<deposit_id>/reject', methods=['POST'])
+def reject_deposit(deposit_id):
+    data = load_data()
+    body = request.json or {}
+    admin_address = body.get('admin_address', '')
+    reason = body.get('reason', '')
+    if admin_address != ADMIN_WALLET:
+        return jsonify({'error': 'Unauthorized. Admin only.'}), 403
+
+    deposit = next((d for d in data.get('deposits', []) if d['id'] == deposit_id), None)
+    if not deposit:
+        return jsonify({'error': 'Deposit not found'}), 404
+    if deposit['status'] != 'pending':
+        return jsonify({'error': 'Deposit not pending'}), 400
+
+    deposit['status'] = 'rejected'
+    deposit['rejected_at'] = int(time.time() * 1000)
+    deposit['rejection_reason'] = reason
+    data['transactions'].append({'type': 'deposit_rejected', 'deposit_id': deposit['id'], 'timestamp': int(time.time() * 1000)})
+    save_data(data)
+    return jsonify({'ok': True, 'deposit': deposit})
 
 # ============ API: TREASURY ============
 

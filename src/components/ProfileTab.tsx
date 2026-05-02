@@ -1,10 +1,15 @@
 import { useApp } from '../data';
 import { Copy, Wallet, Star, TrendingUp, Users, Gift } from 'lucide-react';
 import { useState } from 'react';
+import { useEffect } from 'react';
 
 export default function ProfileTab() {
   const { user } = useApp();
   const [copied, setCopied] = useState(false);
+  const [treasury, setTreasury] = useState('');
+  const [depositAmount, setDepositAmount] = useState<number>(0);
+  const [depositTx, setDepositTx] = useState('');
+  const [depositMsg, setDepositMsg] = useState('');
 
   const copyRef = () => {
     navigator.clipboard?.writeText(user.referralCode);
@@ -14,6 +19,10 @@ export default function ProfileTab() {
 
   const shortAddr = user.address.slice(0, 6) + '...' + user.address.slice(-4);
   const winRate = user.totalBets > 0 ? Math.round((user.wins / user.totalBets) * 100) : 0;
+
+  useEffect(() => {
+    fetch('/api/treasury_wallet').then(r => r.json()).then(j => setTreasury(j.treasury_wallet)).catch(() => {});
+  }, []);
 
   return (
     <div className="flex-1 overflow-y-auto scrollbar-hide pb-24 px-4 pt-4">
@@ -127,6 +136,32 @@ export default function ProfileTab() {
             Правильные голоса валидаторов вознаграждаются. Репутация влияет на вес голоса.
           </p>
         </div>
+      </div>
+
+      {/* Deposit */}
+      <div className="glass rounded-xl p-4 mt-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-white">Пополнение баланса</span>
+        </div>
+        <div className="text-xs text-gray-400 mb-2">Отправьте TON на адрес казны и создайте заявку на зачисление, указав tx hash и сумму.</div>
+        <div className="mb-2">
+          <div className="text-[10px] text-gray-500">Адрес казны</div>
+          <div className="font-mono text-sm text-white break-words">{treasury || 'загрузка...'}</div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <input type="number" value={depositAmount || ''} onChange={e => setDepositAmount(Number(e.target.value))} placeholder="Сумма" className="px-3 py-2 rounded-lg bg-neutral-900" />
+          <input type="text" value={depositTx} onChange={e => setDepositTx(e.target.value)} placeholder="Tx hash (опционально)" className="px-3 py-2 rounded-lg bg-neutral-900 font-mono" />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={async () => {
+            if (!depositAmount || depositAmount <= 0) { setDepositMsg('Неверная сумма'); return; }
+            const res = await fetch('/api/deposits/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_address: user.address, tx_hash: depositTx, amount: depositAmount }) });
+            const j = await res.json();
+            if (j.ok) { setDepositMsg('Заявка создана'); setDepositAmount(0); setDepositTx(''); } else { setDepositMsg(j.error || 'Ошибка'); }
+          }} className="px-3 py-2 rounded-lg bg-green-600">Создать заявку</button>
+          <button onClick={() => { navigator.clipboard?.writeText(treasury || ''); setDepositMsg('Скопировано'); }} className="px-3 py-2 rounded-lg bg-white/10">Скопировать адрес</button>
+        </div>
+        {depositMsg && <div className="text-xs text-green-400 mt-2">{depositMsg}</div>}
       </div>
     </div>
   );
