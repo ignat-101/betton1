@@ -8,7 +8,9 @@ import secrets
 app = Flask(__name__, static_folder='dist', static_url_path='')
 
 # ============ CONFIG ============
-ADMIN_WALLET = 'UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0'
+# Read admin wallet and treasury wallet from environment for deployments
+ADMIN_WALLET = os.environ.get('ADMIN_WALLET', 'UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0')
+TREASURY_WALLET = os.environ.get('TREASURY_WALLET', ADMIN_WALLET)
 DATA_FILE = 'data.json'
 
 # ============ DATA LAYER ============
@@ -20,7 +22,14 @@ def load_data():
         'markets': [],
         'users': {},
         'transactions': [],
-        'treasury': {'balance': 0, 'total_volume': 0}
+        'treasury': {'balance': 0, 'total_volume': 0},
+        # disputes: list of dispute objects created when markets are contested
+        'disputes': [],
+        # payouts: withdrawal requests and their states
+        'payouts': [],
+        # stakes: mapping address -> staked_amount (platform-internal staking pool)
+        'stakes': {},
+        'stake_transactions': []
     }
 
 def save_data(data):
@@ -135,6 +144,30 @@ def place_bet(market_id):
     data['treasury']['balance'] += fee
     data['treasury']['total_volume'] += amount
 
+    # Referral handling: optional referrer gets small reward (1% of bet amount)
+    referrer = body.get('referrer')
+    if referrer and referrer != user_address:
+        referral_reward = round(amount * 0.01, 8)
+        # ensure referrer user exists
+        if referrer not in data['users']:
+            data['users'][referrer] = {
+                'address': referrer,
+                'name': 'referrer',
+                'balance': 0,
+                'reputation': 50,
+                'total_bets': 0,
+                'wins': 0,
+                'losses': 0,
+                'referralCode': None,
+                'referrals': 0,
+                'referralEarnings': 0,
+                'is_admin': referrer == ADMIN_WALLET
+            }
+        data['users'][referrer]['referrals'] = data['users'][referrer].get('referrals', 0) + 1
+        data['users'][referrer]['referralEarnings'] = round(data['users'][referrer].get('referralEarnings', 0) + referral_reward, 8)
+        data['users'][referrer]['balance'] = round(data['users'][referrer].get('balance', 0) + referral_reward, 8)
+        data['transactions'].append({'type': 'referral', 'from': user_address, 'to': referrer, 'amount': referral_reward, 'timestamp': int(time.time() * 1000)})
+
     save_data(data)
     return jsonify({'ok': True, 'market': market})
 
@@ -197,12 +230,352 @@ def resolve_market(market_id):
     save_data(data)
     return jsonify({'ok': True, 'market': market})
 
+# ============ API: DISPUTES & STAKING ============
+
+def find_dispute(data, dispute_id):
+    return next((d for d in data.get('disputes', []) if d['id'] == dispute_id), None)
+
+
+@app.route('/api/disputes', methods=['GET'])
+def list_disputes():
+    data = load_data()
+    return jsonify({'disputes': data.get('disputes', [])})
+
+
+@app.route('/api/disputes', methods=['POST'])
+def create_dispute():
+    data = load_data()
+    body = request.json
+    dispute = {
+        'id': secrets.token_hex(8),
+        'market_id': body.get('market_id'),
+        'title': body.get('title', 'Спор по рынку'),
+        'reason': body.get('reason', ''),
+        'creator': body.get('creator', ''),
+        'created_at': int(time.time() * 1000),
+        'status': 'open',
+        # votes: list of {address, vote: 'yes'|'no', stake, timestamp}
+        'votes': [],
+        'resolved_at': None,
+        'result': None
+    }
+    data['disputes'].append(dispute)
+    save_data(data)
+    return jsonify({'ok': True, 'dispute': dispute})
+
+
+@app.route('/api/disputes/<dispute_id>/vote', methods=['POST'])
+def vote_dispute(dispute_id):
+    data = load_data()
+    body = request.json
+    dispute = find_dispute(data, dispute_id)
+    if not dispute:
+        return jsonify({'error': 'Dispute not found'}), 404
+    if dispute['status'] != 'open':
+        return jsonify({'error': 'Dispute is not open for voting'}), 400
+
+    address = body.get('user_address', '')
+    vote = body.get('vote')  # 'yes' or 'no'
+    stake_amount = float(body.get('stake', 0))
+    if vote not in ('yes', 'no'):
+        return jsonify({'error': 'Invalid vote'}), 400
+    if stake_amount <= 0:
+        return jsonify({'error': 'Invalid stake amount'}), 400
+
+    # Ensure user has staked funds in platform pool
+    user_stake = data.get('stakes', {}).get(address, 0)
+    if user_stake < stake_amount:
+        return jsonify({'error': 'Insufficient staked balance. Stake first via /api/stake'}), 400
+
+    # Record vote and lock the stake (we deduct from available in stakes and keep locked in dispute)
+    vote_entry = {
+        'address': address,
+        'vote': vote,
+        'stake': stake_amount,
+        'timestamp': int(time.time() * 1000)
+    }
+    dispute['votes'].append(vote_entry)
+
+    # subtract from available stake
+    data['stakes'][address] = round(data['stakes'].get(address, 0) - stake_amount, 8)
+    data['stake_transactions'].append({'type': 'lock', 'address': address, 'amount': stake_amount, 'dispute_id': dispute_id, 'timestamp': int(time.time() * 1000)})
+
+    save_data(data)
+    return jsonify({'ok': True, 'dispute': dispute})
+
+
+@app.route('/api/disputes/<dispute_id>/resolve', methods=['POST'])
+def resolve_dispute(dispute_id):
+    data = load_data()
+    body = request.json
+    admin_address = body.get('admin_address', '')
+    dispute = find_dispute(data, dispute_id)
+    if not dispute:
+        return jsonify({'error': 'Dispute not found'}), 404
+    if dispute['status'] != 'open':
+        return jsonify({'error': 'Dispute already resolved'}), 400
+
+    # Allow admin to resolve or auto-resolve if one side holds >66% of stake
+    # compute stakes per side
+    yes_total = sum(v['stake'] for v in dispute['votes'] if v['vote'] == 'yes')
+    no_total = sum(v['stake'] for v in dispute['votes'] if v['vote'] == 'no')
+    total = yes_total + no_total
+    auto_winner = None
+    if total > 0:
+        if yes_total / total >= 0.66:
+            auto_winner = 'yes'
+        elif no_total / total >= 0.66:
+            auto_winner = 'no'
+
+    result = None
+    if auto_winner:
+        result = auto_winner
+    else:
+        if admin_address != ADMIN_WALLET:
+            return jsonify({'error': 'Unauthorized. Admin only to resolve this dispute.'}), 403
+        result = body.get('result')
+        if result not in ('yes', 'no'):
+            return jsonify({'error': 'Invalid result'}), 400
+
+    # distribute locked stakes: losing stakes go to winning voters proportional to their stake (10% fee to treasury)
+    winning = result
+    losing = 'no' if winning == 'yes' else 'yes'
+    winning_votes = [v for v in dispute['votes'] if v['vote'] == winning]
+    losing_total = sum(v['stake'] for v in dispute['votes'] if v['vote'] == losing)
+
+    fee = round(losing_total * 0.10, 8)
+    reward_pool = round(losing_total - fee, 8)
+    data['treasury']['balance'] += fee
+
+    # distribute reward_pool to winning voters proportionally
+    if winning_votes and reward_pool > 0:
+        total_winning_stake = sum(v['stake'] for v in winning_votes)
+        for v in winning_votes:
+            share = (v['stake'] / total_winning_stake) if total_winning_stake > 0 else 0
+            reward = round(reward_pool * share, 8)
+            data['stakes'][v['address']] = round(data['stakes'].get(v['address'], 0) + v['stake'] + reward, 8)
+            data['stake_transactions'].append({'type': 'reward_unlocked', 'address': v['address'], 'amount': v['stake'] + reward, 'dispute_id': dispute_id, 'timestamp': int(time.time() * 1000)})
+    else:
+        # no winners: unlock stakes back to their owners
+        for v in dispute['votes']:
+            data['stakes'][v['address']] = round(data['stakes'].get(v['address'], 0) + v['stake'], 8)
+            data['stake_transactions'].append({'type': 'unlock', 'address': v['address'], 'amount': v['stake'], 'dispute_id': dispute_id, 'timestamp': int(time.time() * 1000)})
+
+    dispute['status'] = 'resolved'
+    dispute['result'] = result
+    dispute['resolved_at'] = int(time.time() * 1000)
+
+    data['transactions'].append({'type': 'dispute_resolution', 'dispute_id': dispute_id, 'result': result, 'resolved_by': admin_address or 'auto', 'timestamp': dispute['resolved_at']})
+
+    save_data(data)
+    return jsonify({'ok': True, 'dispute': dispute})
+
+
+@app.route('/api/stake', methods=['POST'])
+def stake():
+    data = load_data()
+    body = request.json
+    address = body.get('user_address')
+    amount = float(body.get('amount', 0))
+    if not address or amount <= 0:
+        return jsonify({'error': 'Invalid stake request'}), 400
+
+    data['stakes'][address] = round(data['stakes'].get(address, 0) + amount, 8)
+    data['stake_transactions'].append({'type': 'stake', 'address': address, 'amount': amount, 'timestamp': int(time.time() * 1000)})
+    save_data(data)
+    return jsonify({'ok': True, 'staked': data['stakes'][address]})
+
+
+@app.route('/api/unstake', methods=['POST'])
+def unstake():
+    data = load_data()
+    body = request.json
+    address = body.get('user_address')
+    amount = float(body.get('amount', 0))
+    if not address or amount <= 0:
+        return jsonify({'error': 'Invalid unstake request'}), 400
+    available = data['stakes'].get(address, 0)
+    if amount > available:
+        return jsonify({'error': 'Insufficient staked balance'}), 400
+    data['stakes'][address] = round(available - amount, 8)
+    data['stake_transactions'].append({'type': 'unstake', 'address': address, 'amount': amount, 'timestamp': int(time.time() * 1000)})
+    save_data(data)
+    return jsonify({'ok': True, 'staked': data['stakes'][address]})
+
+
+@app.route('/api/stake/<address>', methods=['GET'])
+def get_stake(address):
+    data = load_data()
+    return jsonify({'address': address, 'staked': data.get('stakes', {}).get(address, 0)})
+
+
+@app.route('/api/payouts', methods=['GET'])
+def list_payouts():
+    data = load_data()
+    user = request.args.get('user')
+    payouts = data.get('payouts', [])
+    if user:
+        payouts = [p for p in payouts if p.get('user_address') == user]
+    return jsonify({'payouts': payouts})
+
+
+def ensure_user(data, address):
+    if address not in data.get('users', {}):
+        data['users'][address] = {
+            'address': address,
+            'name': 'anonymous',
+            'balance': 0,
+            'reputation': 50,
+            'total_bets': 0,
+            'wins': 0,
+            'losses': 0,
+            'referralCode': None,
+            'referrals': 0,
+            'referralEarnings': 0,
+            'is_admin': address == ADMIN_WALLET
+        }
+
+
+@app.route('/api/payouts/request', methods=['POST'])
+def request_payout():
+    data = load_data()
+    body = request.json or {}
+    user_address = body.get('user_address')
+    to_address = body.get('to_address') or user_address
+    amount = float(body.get('amount', 0))
+    note = body.get('note', '')
+
+    if not user_address or amount <= 0:
+        return jsonify({'error': 'Invalid payout request'}), 400
+
+    ensure_user(data, user_address)
+    user = data['users'][user_address]
+    balance = float(user.get('balance', 0))
+    if amount > balance:
+        return jsonify({'error': 'Insufficient balance'}), 400
+
+    # deduct balance immediately and create payout request
+    user['balance'] = round(balance - amount, 8)
+    payout = {
+        'id': secrets.token_hex(8),
+        'user_address': user_address,
+        'to_address': to_address,
+        'amount': round(amount, 8),
+        'note': note,
+        'status': 'pending',
+        'created_at': int(time.time() * 1000),
+        'approved_by': None,
+        'approved_at': None,
+        'sent_at': None,
+        'tx_hash': None,
+        'error': None
+    }
+    data['payouts'].append(payout)
+    data['transactions'].append({'type': 'payout_request', 'payout_id': payout['id'], 'user': user_address, 'amount': payout['amount'], 'timestamp': int(time.time() * 1000)})
+    save_data(data)
+    return jsonify({'ok': True, 'payout': payout})
+
+
+@app.route('/api/payouts/<payout_id>/approve', methods=['POST'])
+def approve_payout(payout_id):
+    data = load_data()
+    body = request.json or {}
+    admin_address = body.get('admin_address', '')
+    if admin_address != ADMIN_WALLET:
+        return jsonify({'error': 'Unauthorized. Admin only.'}), 403
+
+    payout = next((p for p in data.get('payouts', []) if p['id'] == payout_id), None)
+    if not payout:
+        return jsonify({'error': 'Payout not found'}), 404
+    if payout['status'] != 'pending':
+        return jsonify({'error': 'Payout not in pending state'}), 400
+
+    payout['status'] = 'approved'
+    payout['approved_by'] = admin_address
+    payout['approved_at'] = int(time.time() * 1000)
+    save_data(data)
+
+    # If a signer service is configured, call it to broadcast the transaction
+    signer_url = os.environ.get('PAYOUT_SIGNER_URL')
+    if signer_url:
+        try:
+            import urllib.request
+            payload = json.dumps({'to': payout['to_address'], 'amount': payout['amount'], 'payout_id': payout['id']}).encode('utf-8')
+            req = urllib.request.Request(signer_url, data=payload, headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                res = json.loads(resp.read())
+            # signer should return { tx_hash: '0x...' }
+            if res.get('tx_hash'):
+                payout['status'] = 'sent'
+                payout['tx_hash'] = res.get('tx_hash')
+                payout['sent_at'] = int(time.time() * 1000)
+                data['transactions'].append({'type': 'payout_sent', 'payout_id': payout['id'], 'tx_hash': payout['tx_hash'], 'timestamp': int(time.time() * 1000)})
+            else:
+                payout['status'] = 'error'
+                payout['error'] = res.get('error', 'no tx_hash returned by signer')
+        except Exception as e:
+            payout['status'] = 'error'
+            payout['error'] = str(e)
+        save_data(data)
+
+    return jsonify({'ok': True, 'payout': payout})
+
+
+@app.route('/api/payouts/<payout_id>/complete', methods=['POST'])
+def complete_payout(payout_id):
+    data = load_data()
+    body = request.json or {}
+    admin_address = body.get('admin_address', '')
+    tx_hash = body.get('tx_hash')
+    if admin_address != ADMIN_WALLET:
+        return jsonify({'error': 'Unauthorized. Admin only.'}), 403
+
+    payout = next((p for p in data.get('payouts', []) if p['id'] == payout_id), None)
+    if not payout:
+        return jsonify({'error': 'Payout not found'}), 404
+    payout['status'] = 'completed'
+    payout['tx_hash'] = tx_hash or payout.get('tx_hash')
+    payout['completed_at'] = int(time.time() * 1000)
+    data['transactions'].append({'type': 'payout_completed', 'payout_id': payout['id'], 'tx_hash': payout['tx_hash'], 'timestamp': int(time.time() * 1000)})
+    save_data(data)
+    return jsonify({'ok': True, 'payout': payout})
+
+
+@app.route('/api/payouts/<payout_id>/cancel', methods=['POST'])
+def cancel_payout(payout_id):
+    data = load_data()
+    body = request.json or {}
+    admin_address = body.get('admin_address', '')
+    if admin_address != ADMIN_WALLET:
+        return jsonify({'error': 'Unauthorized. Admin only.'}), 403
+
+    payout = next((p for p in data.get('payouts', []) if p['id'] == payout_id), None)
+    if not payout:
+        return jsonify({'error': 'Payout not found'}), 404
+    if payout['status'] in ('completed', 'sent'):
+        return jsonify({'error': 'Cannot cancel already sent/completed payout'}), 400
+
+    # refund the user's internal balance
+    ensure_user(data, payout['user_address'])
+    data['users'][payout['user_address']]['balance'] = round(data['users'][payout['user_address']].get('balance', 0) + payout['amount'], 8)
+    payout['status'] = 'cancelled'
+    payout['cancelled_at'] = int(time.time() * 1000)
+    data['transactions'].append({'type': 'payout_cancelled', 'payout_id': payout['id'], 'timestamp': int(time.time() * 1000)})
+    save_data(data)
+    return jsonify({'ok': True, 'payout': payout})
+
 # ============ API: TREASURY ============
 
 @app.route('/api/treasury', methods=['GET'])
 def get_treasury():
     data = load_data()
     return jsonify(data['treasury'])
+
+
+@app.route('/api/treasury_wallet', methods=['GET'])
+def get_treasury_wallet():
+    # Return the configured treasury wallet address (for operator use)
+    return jsonify({'treasury_wallet': TREASURY_WALLET})
 
 # ============ API: USER ============
 
@@ -217,6 +590,9 @@ def get_user(address):
         'total_bets': 0,
         'wins': 0,
         'losses': 0,
+        'referralCode': None,
+        'referrals': 0,
+        'referralEarnings': 0,
         'is_admin': address == ADMIN_WALLET
     })
     return jsonify(user)

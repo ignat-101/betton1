@@ -1,10 +1,11 @@
 import { useApp } from '../data';
-import { TrendingUp, Plus, User } from 'lucide-react';
+import { TrendingUp, Plus, User, MessageSquare } from 'lucide-react';
 import type { TabType } from '../types';
 
 const tabs: { id: TabType; label: string; icon: typeof TrendingUp }[] = [
   { id: 'markets', label: 'Рынки', icon: TrendingUp },
   { id: 'create', label: 'Создать', icon: Plus },
+  { id: 'disputes', label: 'Споры', icon: MessageSquare },
   { id: 'profile', label: 'Профиль', icon: User },
 ];
 

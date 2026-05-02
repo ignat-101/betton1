@@ -30,85 +30,95 @@ Telegram Mini App с тремя вкладками:
 
 ---
 
-## 🚀 Деплой на Render.com
+## 🚀 Деплой на Render.com (инструкции)
 
-### Вариант 1: Через render.yaml (рекомендуется)
+Процесс автоматического деплоя на Render проще всего настроить через `render.yaml`, который уже присутствует в репозитории. Ниже — пошаговая инструкция и проверки, которые я добавил в репозиторий.
 
-1. **Залейте код на GitHub:**
-   ```bash
-   git init
-   git add .
-   git commit -m "TON FlashBet initial release"
-   git remote add origin https://github.com/YOUR_USERNAME/ton-flashbet.git
-   git push -u origin main
-   ```
+### 1) Автоматический деплой через `render.yaml`
 
-2. **Подключите Render:**
-   - Зайдите на [render.com](https://render.com)
-   - Нажмите **"New"** → **" Web Service"**
-   - Подключите ваш GitHub репозиторий
+1. Залейте код в GitHub (уже сделано автоматически при создании репозитория ниже).
 
-3. **Настройте Render:**
-   - **Runtime**: Python 3
-   - **Build Command**:
-     ```bash
-     pip install -r backend/requirements.txt && npm install && npm run build && cp -r dist backend/dist
-     ```
-   - **Start Command**:
-     ```bash
-     cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --workers 2
-     ```
-   - **Environment Variables**:
-     | Key | Value |
-     |-----|-------|
-     | `ADMIN_WALLET` | `UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0` |
+2. На Render: **New → Web Service → Connect a repository** и выберите `betton1`.
 
-4. **Нажмите "Create Web Service"** и дождитесь деплоя.
+3. Render использует `render.yaml` для конфигурации. В `render.yaml` уже прописаны:
+   - `buildCommand`: `pip install -r backend/requirements.txt && cd .. && npm install && npm run build && cp -r dist backend/dist`
+   - `startCommand`: `cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --workers 2`
+   - `PYTHON_VERSION: "3.11.0"`, `NODE_VERSION: "20.0.0"`
 
-### Вариант 2: Через Dashboard вручную
+4. В Render Dashboard добавьте секреты/переменные окружения (лучше как Secrets):
+   - `ADMIN_WALLET` — ваш админ-кошелёк (рекомендую задать как Secret, а не хранить в `render.yaml`).
 
-1. **Создайте Web Service** на Render
-2. Подключите GitHub репо
-3. Установите настройки:
-   ```
-   Runtime:         Python 3
-   Build Command:   pip install -r backend/requirements.txt && npm install && npm run build && cp -r dist backend/dist
-   Start Command:   cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --workers 2
-   ```
-4. Добавьте env var `ADMIN_WALLET`
+5. Включите `Auto Deploy` (Deploy on push) для ветки `main`.
 
-### После деплоя
+### 2) Ручная настройка через Dashboard (если нужно)
 
-Ваше приложение будет доступно по URL вида:
-```
-https://ton-flashbet.onrender.com
-```
+Если хотите настроить Web Service вручную, укажите:
+
+- Build Command:
+  ```bash
+  pip install -r backend/requirements.txt && npm install && npm run build && cp -r dist backend/dist
+  ```
+- Start Command:
+  ```bash
+  cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --workers 2
+  ```
+- Environment variables / Secrets: добавьте `ADMIN_WALLET` и любые другие секреты.
+
+### 3) После деплоя
+
+URL будет вида: `https://<your-service>.onrender.com`. Проверяйте логи через Render Dashboard → Logs.
 
 ---
 
 ## 📱 Подключение к Telegram Bot
 
 1. Создайте бота через [@BotFather](https://t.me/BotFather)
-2. Установите Web App URL:
-   ```
-   /setmenubutton → ваш-бот → https://ton-flashbet.onrender.com
-   ```
-3. Или используйте `WebApp` в inline кнопках:
-   ```python
-   from telegram import InlineKeyboardButton, WebAppInfo
-   
-   keyboard = [[InlineKeyboardButton("Открыть FlashBet", web_app=WebAppInfo(url="https://ton-flashbet.onrender.com"))]]
-   ```
+2. Установите Web App URL в настройках бота или используйте `WebApp` в inline кнопках, указывая URL вашего развернутого сервиса.
 
 ---
 
-## 🔐 Админ-доступ
+## 🔐 Рекомендации по безопасности
 
-Администратор с кошельком `UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0` может:
-- Просматривать все рынки в админ-панели
-- Разрешать рынки (Да/Нет)
-- Видеть голоса валидаторов
-- Управлять казной
+- Уберите чувствительные данные из `render.yaml` (если есть) и используйте Secrets в Render Dashboard.
+- Проверьте `.gitignore` — он уже исключает `node_modules`, `dist` и `.env`.
+
+## 💸 Интеграция выплат (Payouts)
+
+Архитектура выплат реализована как безопасный рабочий процесс, где сервер хранит внутренние балансы и создаёт заявки на выплату, а подпись и отправка транзакций выполняется отдельным сервисом (рекомендуемый способ).
+
+1) Парадигма работы
+- Пользователь накапливает внутренний `balance` (реферальные выплаты и т.д.).
+- Запрос на вывод создаёт запись `payout` в `data.json` и резервирует сумму (снимается с внутреннего баланса).
+- Админ утверждает заявку: при наличии `PAYOUT_SIGNER_URL` сервер отправит запрос к внешнему signer‑сервису, который подпишет и вышлет транзакцию в TON.
+- После успешной отправки запись помечается как `sent` и хэш транзакции сохраняется.
+
+2) Endpoints (backend)
+- `POST /api/payouts/request` — запрос на выплату; тело: `{ user_address, to_address?, amount, note? }`.
+- `GET /api/payouts` — список заявок; можно фильтровать `?user=<address>`.
+- `POST /api/payouts/<id>/approve` — (admin) одобрить выплату; если задан `PAYOUT_SIGNER_URL`, будет вызван внешний signer.
+- `POST /api/payouts/<id>/complete` — (admin) пометить выплату завершённой и записать `tx_hash`.
+- `POST /api/payouts/<id>/cancel` — (admin) отменить и вернуть баланс пользователю.
+
+3) Настройка Signer (рекомендация)
+- Рекомендуемый подход: держать приватный ключ/seed в отдельном сервисе/секрете (HSM, Vault) и запрашивать подпись через HTTPS.
+- Signer должен принимать POST JSON: `{ to, amount, payout_id }` и возвращать `{ tx_hash }` при успехе или `{ error }` при ошибке.
+
+Пример контрактного поведения signer (псевдокод):
+```
+POST /sign
+Input: { to, amount, payout_id }
+Action: create and sign internal message, broadcast via TON RPC/toncenter, return { tx_hash }
+```
+
+4) Переменные окружения
+- `PAYOUT_SIGNER_URL` — URL внешнего signer‑сервиса (рекомендуемый). Если не задан — выплаты обрабатываются вручную через `approve/complete`.
+- `TREASURY_WALLET` — адрес корпоративной казны (используется для видимости и управления).
+
+5) Безопасность и эксплуатация
+- Никогда не храните сид‑фразы в репозитории. Храните их в защищённом секретном хранилище и предоставляйте signer‑сервису доступ только через защищённый канал.
+- Используйте rate‑limit и логирование на signer‑сервисе.
+
+Если хотите, могу добавить пример простого signer‑сервиса на Node.js с использованием `tonweb`/`ton` SDK и инструкцией по хранению seed в Render Secrets или HashiCorp Vault.
 
 ---
 
@@ -117,25 +127,10 @@ https://ton-flashbet.onrender.com
 ```
 ton-flashbet/
 ├── src/                    # React Frontend (TMA)
-│   ├── App.tsx            # Главный компонент
-│   ├── data.tsx           # Состояние и моковые данные
-│   ├── types.ts           # TypeScript типы
-│   └── components/        # UI компоненты
-│       ├── Header.tsx
-│       ├── TabBar.tsx
-│       ├── MarketsTab.tsx
-│       ├── MarketCard.tsx
-│       ├── MarketDetail.tsx
-│       ├── CreateBetTab.tsx
-│       ├── ProfileTab.tsx
-│       └── AdminPanel.tsx
 ├── backend/               # Python Backend
-│   ├── app.py            # Flask сервер
-│   └── requirements.txt  # Python зависимости
 ├── index.html
 ├── package.json
 ├── vite.config.ts
-├── tailwind.config.ts
 ├── render.yaml            # Render.com конфигурация
 └── README.md
 ```

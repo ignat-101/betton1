@@ -59,5 +59,25 @@ export interface UserProfile {
   isAdmin: boolean;
 }
 
-export type TabType = 'markets' | 'create' | 'profile';
+export interface DisputeVote {
+  address: string;
+  vote: 'yes' | 'no';
+  stake: number;
+  timestamp: number;
+}
+
+export interface Dispute {
+  id: string;
+  market_id?: string;
+  title: string;
+  reason?: string;
+  creator?: string;
+  created_at: number;
+  status: 'open' | 'resolved';
+  votes: DisputeVote[];
+  resolved_at?: number;
+  result?: 'yes' | 'no' | null;
+}
+
+export type TabType = 'markets' | 'create' | 'disputes' | 'profile';
 export type FilterType = 'all' | 'crypto' | 'sports' | 'politics' | 'weather' | 'other';

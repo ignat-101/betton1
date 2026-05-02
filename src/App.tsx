@@ -5,6 +5,7 @@ import MarketsTab from './components/MarketsTab';
 import MarketDetail from './components/MarketDetail';
 import CreateBetTab from './components/CreateBetTab';
 import ProfileTab from './components/ProfileTab';
+import DisputesTab from './components/DisputesTab';
 import AdminPanel from './components/AdminPanel';
 
 function AppContent() {
@@ -22,6 +23,8 @@ function AppContent() {
         <MarketsTab />
       ) : activeTab === 'create' ? (
         <CreateBetTab />
+      ) : activeTab === 'disputes' ? (
+        <DisputesTab />
       ) : (
         <ProfileTab />
       )}
