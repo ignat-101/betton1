@@ -39,7 +39,7 @@ def fetch_usd_price(coin_id: str):
     try:
         import urllib.request
         url = f'https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd'
-        req = urllib.request.Request(url, headers={'User-Agent': 'TON-FlashBet/1.0'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'betton/1.0'})
         with urllib.request.urlopen(req, timeout=10) as resp:
             j = json.loads(resp.read())
         return float(j.get(coin_id, {}).get('usd', 0))
@@ -974,7 +974,7 @@ def get_price(coin_id):
     import urllib.request
     try:
         url = f'https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd'
-        req = urllib.request.Request(url, headers={'User-Agent': 'TON-FlashBet/1.0'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'betton/1.0'})
         with urllib.request.urlopen(req, timeout=10) as resp:
             return jsonify(json.loads(resp.read()))
     except Exception as e:

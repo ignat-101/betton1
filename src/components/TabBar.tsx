@@ -5,7 +5,7 @@ import type { TabType } from '../types';
 const tabs: { id: TabType; label: string; icon: typeof TrendingUp }[] = [
   { id: 'markets', label: 'Рынки', icon: TrendingUp },
   { id: 'create', label: 'Создать', icon: Plus },
-  { id: 'disputes', label: 'Споры', icon: MessageSquare },
+  { id: 'disputes', label: 'Заработать', icon: MessageSquare },
   { id: 'profile', label: 'Профиль', icon: User },
 ];
 

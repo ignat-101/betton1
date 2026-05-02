@@ -149,7 +149,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const mod = await import('@tonconnect/sdk');
       const { TonConnect } = mod as any;
-      const ton = new TonConnect({ manifestUrl: '/.well-known/ton-connect.json' });
+      const ton = new TonConnect({ manifestUrl: 'https://bet-ton.onrender.com/.well-known/ton-connect.json' });
       tonRef.current = ton;
       // if already connected
       if ((ton as any).account && (ton as any).account.address) {

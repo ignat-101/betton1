@@ -56,7 +56,7 @@ export default function ProfileTab() {
           <Wallet size={16} className="text-white" />
           <div>
             <div className="text-xl font-bold text-white">{user.balance.toLocaleString()}</div>
-            <div className="text-xs text-gray-500">USDT эквивалент (баланс)</div>
+              <div className="text-xs text-gray-500">USDT эквивалент (баланс)</div>
           </div>
         </div>
       </div>
@@ -127,7 +127,7 @@ export default function ProfileTab() {
           </div>
           <div className="text-center p-2 rounded-lg bg-white/5">
             <TrendingUp size={12} className="text-gray-500 mx-auto mb-1" />
-            <div className="text-sm font-bold text-white">{user.referralEarnings} ⭐</div>
+            <div className="text-sm font-bold text-white">{user.referralEarnings} USDT</div>
             <div className="text-[10px] text-gray-600">заработано</div>
           </div>
         </div>
@@ -137,7 +137,7 @@ export default function ProfileTab() {
       <div className="glass rounded-xl p-4">
         <div className="text-xs text-gray-500 leading-relaxed">
           <p className="mb-2">
-            <strong className="text-gray-300">TON FlashBet</strong> — моментальные ставки на любые события.
+            <strong className="text-gray-300">betton</strong> — моментальные ставки на любые события.
           </p>
           <p className="mb-2">
             Оплата в звёздах Telegram. Разрешение споров через оракулов и голосование валидаторов (Proof of Stake).

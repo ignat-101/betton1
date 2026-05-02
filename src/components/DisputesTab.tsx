@@ -53,22 +53,12 @@ export default function DisputesTab() {
   return (
     <div className="flex-1 overflow-y-auto scrollbar-hide pb-24 px-4">
       <div className="py-3">
-        <h2 className="text-sm font-semibold mb-2">Стейкинг (Proof of Stake)</h2>
+        <h2 className="text-sm font-semibold mb-2">Заработать — участвуйте в спорах</h2>
         <div className="flex gap-2 items-center">
           <input type="number" value={stakeAmount} onChange={e => setStakeAmount(Number(e.target.value))} className="w-28 px-3 py-2 rounded-lg bg-neutral-900" />
           <button onClick={() => doStake(stakeAmount)} className="px-3 py-2 rounded-lg bg-blue-600">Застейкать</button>
         </div>
-        <p className="text-xs text-gray-400 mt-2">Стейк нужен для участия в голосованиях по спорам — при выигрыше вы получите часть ставок проигравшей стороны.</p>
-      </div>
-
-      <div className="mt-4">
-        <h2 className="text-sm font-semibold mb-2">Создать спор</h2>
-        <input value={title} onChange={e => setTitle(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-neutral-900 mb-2" placeholder="Вопрос / заголовок спора" />
-        <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-lg bg-neutral-900" placeholder="Описание (доп. детали)" />
-        <div className="flex gap-2 mt-2 items-center">
-          <input type="datetime-local" value={expiresAt} onChange={e => setExpiresAt(e.target.value)} className="px-3 py-2 rounded-lg bg-neutral-900" />
-          <button onClick={createDispute} className="px-3 py-2 rounded-lg bg-green-600">Создать спор</button>
-        </div>
+        <p className="text-xs text-gray-400 mt-2">Зарабатывайте, участвуя в разрешении споров: вы сте́йните средства, голосуете «Да/Нет» и получаете вознаграждение при правильном голосовании. Спор открывается прямо на странице рынка (кнопка «Открыть спор»).</p>
       </div>
 
       <div className="mt-6">

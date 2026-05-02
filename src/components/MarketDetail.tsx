@@ -3,12 +3,16 @@ import { useApp } from '../data';
 import { ArrowLeft, Clock, Users, CheckCircle, AlertTriangle, Vote } from 'lucide-react';
 
 export default function MarketDetail() {
-  const { selectedMarket: market, selectMarket, placeBet, voteOnMarket } = useApp();
+  const { selectedMarket: market, selectMarket, placeBet, voteOnMarket, user } = useApp();
   const [betOutcome, setBetOutcome] = useState<'yes' | 'no'>('yes');
   const [betAmount, setBetAmount] = useState('');
   const [showVote, setShowVote] = useState(false);
   const [betPlaced, setBetPlaced] = useState(false);
   const [votePlaced, setVotePlaced] = useState(false);
+  const [showDisputeForm, setShowDisputeForm] = useState(false);
+  const [disputeTitle, setDisputeTitle] = useState('');
+  const [disputeDesc, setDisputeDesc] = useState('');
+  const [disputeExpires, setDisputeExpires] = useState('');
 
   if (!market) return null;
 
@@ -154,7 +158,7 @@ export default function MarketDetail() {
                 <div key={i} className="flex items-center justify-between text-xs">
                   <span className="text-gray-400">{v.name}</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-600">{v.stake} ⭐</span>
+                      <span className="text-gray-600">{v.stake} USDT</span>
                     <span className={v.vote === 'yes' ? 'text-green-400' : 'text-red-400'}>
                       {v.vote === 'yes' ? 'Да' : 'Нет'}
                     </span>
@@ -260,7 +264,7 @@ export default function MarketDetail() {
                   Голосование за результат
                 </div>
                 <p className="text-[11px] text-gray-500">
-                  Ставите 100 ⭐ на ваш голос. Правильный голос — вознаграждение.
+                  Ставите 100 USDT на ваш голос. Правильный голос — вознаграждение.
                 </p>
                 <div className="flex gap-2">
                   <button
@@ -280,6 +284,33 @@ export default function MarketDetail() {
             )}
           </div>
         )}
+
+        {/* Open Dispute */}
+        <div className="mt-3">
+          {!showDisputeForm ? (
+            <div className="flex gap-2">
+              <button onClick={() => setShowDisputeForm(true)} className="flex-1 py-3 rounded-lg text-sm font-medium bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25 transition-colors">Открыть спор</button>
+            </div>
+          ) : (
+            <div className="glass rounded-xl p-4 space-y-2">
+              <div className="text-xs font-medium text-gray-400 uppercase tracking-wider">Открыть спор по рынку</div>
+              <input value={disputeTitle} onChange={(e) => setDisputeTitle(e.target.value)} placeholder="Короткий вопрос" className="w-full px-3 py-2 rounded-lg bg-white/5" />
+              <textarea value={disputeDesc} onChange={(e) => setDisputeDesc(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-lg bg-white/5" placeholder="Описание (детали)" />
+              <input type="datetime-local" value={disputeExpires} onChange={e => setDisputeExpires(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-white/5" />
+              <div className="flex gap-2">
+                <button onClick={async () => {
+                  // submit dispute for this market
+                  if (!disputeTitle) return alert('Введите вопрос');
+                  const expires_ts = disputeExpires ? new Date(disputeExpires).getTime() : 0;
+                  const res = await fetch('/api/disputes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: disputeTitle, description: disputeDesc, expires_at: expires_ts, creator: user.address || '' , market_id: market.id, category: market.category }) });
+                  const j = await res.json();
+                  if (j.ok) { setShowDisputeForm(false); setDisputeTitle(''); setDisputeDesc(''); setDisputeExpires(''); alert('Спор создан'); } else alert(j.error || 'Ошибка');
+                }} className="flex-1 py-2 rounded-lg bg-green-600">Создать спор</button>
+                <button onClick={() => setShowDisputeForm(false)} className="flex-1 py-2 rounded-lg bg-white/10">Отмена</button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Resolved */}
         {market.status === 'resolved' && market.resolution && (

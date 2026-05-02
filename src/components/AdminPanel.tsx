@@ -40,8 +40,8 @@ export default function AdminPanel() {
           {market.voters.map((v, i) => (
             <div key={i} className="flex justify-between text-gray-400">
               <span>{v.name}</span>
-              <span className={v.vote === 'yes' ? 'text-green-400' : 'text-red-400'}>
-                {v.vote === 'yes' ? 'Да' : 'Нет'} ({v.stake} ⭐)
+                <span className={v.vote === 'yes' ? 'text-green-400' : 'text-red-400'}>
+                {v.vote === 'yes' ? 'Да' : 'Нет'} ({v.stake} USDT)
               </span>
             </div>
           ))}
