@@ -27,6 +27,7 @@ export interface Market {
   resolution?: 'yes' | 'no';
   resolvedAt?: number;
   image?: string;
+  history?: { t: number; yes: number }[];
 }
 
 export interface Voter {

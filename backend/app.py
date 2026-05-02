@@ -33,6 +33,65 @@ def load_data():
         'stake_transactions': []
     }
 
+
+def fetch_usd_price(coin_id: str):
+    """Return USD price for a given CoinGecko coin id or None on error."""
+    try:
+        import urllib.request
+        url = f'https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd'
+        req = urllib.request.Request(url, headers={'User-Agent': 'TON-FlashBet/1.0'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            j = json.loads(resp.read())
+        return float(j.get(coin_id, {}).get('usd', 0))
+    except Exception:
+        return None
+
+
+def ensure_hot_markets(data):
+    """Create or refresh short 5-minute crypto markets for BTC/ETH/SOL/TON.
+    These markets are oracle-resolved only.
+    """
+    now = int(time.time() * 1000)
+    coins = [
+        ('bitcoin', 'BTC'),
+        ('ethereum', 'ETH'),
+        ('solana', 'SOL'),
+        ('the-open-network', 'TON')
+    ]
+    for coin_id, symbol in coins:
+        # find active hot market for this coin
+        hot = next((m for m in data['markets'] if m.get('meta', {}).get('hot') and m.get('meta', {}).get('coin') == coin_id and m['status'] == 'active'), None)
+        if hot:
+            # if expired, we'll resolve later when get_markets is called
+            continue
+        # create new hot market
+        start_price = fetch_usd_price(coin_id) or 0
+        market = {
+            'id': f'hot-{coin_id}-{now}',
+            'title': f'{symbol} 5m: рост или падение?',
+            'description': f'Горячие 5-минутные ставки на {symbol} (oracle-only).',
+            'category': 'crypto',
+            'creator_address': '',
+            'creator_name': 'oracle',
+            'created_at': now,
+            'end_date': now + 5*60*1000,
+            'status': 'active',
+            'oracle_type': 'crypto',
+            'oracle_config': coin_id,
+            'outcomes': {
+                'yes': {'label': 'Выше', 'probability': 50, 'pool': 0},
+                'no': {'label': 'Ниже', 'probability': 50, 'pool': 0}
+            },
+            'total_volume': 0,
+            'voters': [],
+            'resolution': None,
+            'resolved_at': None,
+            'meta': {'hot': True, 'coin': coin_id, 'start_price': start_price},
+            'history': [{'t': now, 'yes': 50}]
+        }
+        data['markets'].append(market)
+    save_data(data)
+
 def save_data(data):
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -55,6 +114,24 @@ def serve_static(path):
 @app.route('/api/markets', methods=['GET'])
 def get_markets():
     data = load_data()
+    # ensure hot markets exist
+    ensure_hot_markets(data)
+    now = int(time.time() * 1000)
+    # auto-resolve expired hot markets using oracle (price compare)
+    for m in data['markets']:
+        if m.get('meta', {}).get('hot') and m.get('status') == 'active' and m.get('end_date', 0) <= now:
+            coin = m.get('meta', {}).get('coin')
+            start_price = m.get('meta', {}).get('start_price', 0)
+            current_price = fetch_usd_price(coin) or 0
+            result = 'yes' if current_price > start_price else 'no'
+            m['status'] = 'resolved'
+            m['resolution'] = result
+            m['resolved_at'] = now
+            data['transactions'].append({'type': 'resolution', 'market_id': m['id'], 'result': result, 'resolved_by': 'oracle', 'timestamp': now})
+            # record final history point
+            if 'history' not in m: m['history'] = []
+            m['history'].append({'t': now, 'yes': m['outcomes']['yes']['probability']})
+    save_data(data)
     status = request.args.get('status')
     category = request.args.get('category')
     markets = data['markets']
@@ -87,7 +164,8 @@ def create_market():
         'total_volume': 0,
         'voters': [],
         'resolution': None,
-        'resolved_at': None
+        'resolved_at': None,
+        'history': [{'t': int(time.time() * 1000), 'yes': 50}]
     }
     data['markets'].append(market)
     save_data(data)
@@ -120,15 +198,29 @@ def place_bet(market_id):
     if amount <= 0:
         return jsonify({'error': 'Invalid amount'}), 400
 
+    # Ensure user exists and has sufficient balance (balance stored in USDT equivalent)
+    ensure_user(data, user_address)
+    user_balance = float(data['users'][user_address].get('balance', 0))
+    if amount > user_balance:
+        return jsonify({'error': 'Insufficient balance'}), 400
+
     # Update pool
     market['outcomes'][outcome]['pool'] += amount
     market['total_volume'] = market['outcomes']['yes']['pool'] + market['outcomes']['no']['pool']
+
+    # Deduct user balance
+    data['users'][user_address]['balance'] = round(user_balance - amount, 8)
 
     # Recalculate probabilities
     yes_pool = market['outcomes']['yes']['pool']
     total = market['outcomes']['yes']['pool'] + market['outcomes']['no']['pool']
     market['outcomes']['yes']['probability'] = round((yes_pool / total) * 100) if total > 0 else 50
     market['outcomes']['no']['probability'] = 100 - market['outcomes']['yes']['probability']
+
+    # Append history point for probability chart
+    if 'history' not in market:
+        market['history'] = []
+    market['history'].append({'t': int(time.time() * 1000), 'yes': market['outcomes']['yes']['probability']})
 
     # Record transaction
     data['transactions'].append({
@@ -247,13 +339,15 @@ def list_disputes():
 def create_dispute():
     data = load_data()
     body = request.json
+    # Simplified dispute creation: only question/title, expires_at and description
+    # Keep other fields minimal; creator optional
     dispute = {
         'id': secrets.token_hex(8),
-        'market_id': body.get('market_id'),
-        'title': body.get('title', 'Спор по рынку'),
-        'reason': body.get('reason', ''),
+        'title': body.get('title') or body.get('question') or 'Спор',
+        'description': body.get('description') or body.get('reason') or '',
         'creator': body.get('creator', ''),
         'created_at': int(time.time() * 1000),
+        'expires_at': int(body.get('expires_at', 0)) or int(time.time() * 1000) + 24*3600*1000,
         'status': 'open',
         # votes: list of {address, vote: 'yes'|'no', stake, timestamp}
         'votes': [],
@@ -641,8 +735,8 @@ def cancel_payout(payout_id):
 def tonconnect_manifest():
     # Minimal TonConnect manifest — adjust icons/homepage as needed
     manifest = {
-        'name': 'TON FlashBet',
-        'description': 'FlashBet — ставки на TON',
+        'name': 'betton',
+        'description': 'betton — ставки на криптовалюты',
         'homepage': 'https://bet-ton.onrender.com',
         'icons': [f'https://bet-ton.onrender.com/logo192.png'],
         'redirect': {'login': 'https://bet-ton.onrender.com'}
@@ -668,6 +762,7 @@ def request_deposit():
     tx_hash = body.get('tx_hash')
     amount = float(body.get('amount', 0))
     to_address = body.get('to_address')
+    currency = (body.get('currency') or 'TON').upper()
 
     if not user_address or amount <= 0:
         return jsonify({'error': 'Invalid deposit request'}), 400
@@ -678,6 +773,9 @@ def request_deposit():
         'to_address': to_address or TREASURY_WALLET,
         'tx_hash': tx_hash,
         'amount': round(amount, 8),
+        'currency': currency,
+        'converted_amount_usdt': None,
+        'original_amount_ton': amount if currency == 'TON' else None,
         'status': 'pending',
         'created_at': int(time.time() * 1000),
         'approved_by': None,
@@ -704,12 +802,22 @@ def request_deposit():
                 to_addr = res.get('to')
                 verified_amount = float(res.get('amount', 0))
                 if to_addr and to_addr == (deposit['to_address'] or TREASURY_WALLET) and verified_amount >= deposit['amount']:
+                    # conversion: if deposit in TON, convert to USDT by current TON/USD price
+                    if deposit.get('currency') == 'TON':
+                        price = fetch_usd_price('the-open-network') or 0
+                        converted = round(verified_amount * price, 8)
+                        deposit['converted_amount_usdt'] = converted
+                        deposit['original_amount_ton'] = verified_amount
+                        credit_amount = converted
+                    else:
+                        credit_amount = round(verified_amount, 8)
+
                     ensure_user(data, deposit['user_address'])
-                    data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + deposit['amount'], 8)
+                    data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + credit_amount, 8)
                     deposit['status'] = 'approved'
                     deposit['approved_by'] = 'auto'
                     deposit['approved_at'] = int(time.time() * 1000)
-                    data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': deposit['amount'], 'timestamp': int(time.time() * 1000)})
+                    data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': credit_amount, 'timestamp': int(time.time() * 1000)})
                 else:
                     deposit['status'] = 'rejected'
                     deposit['rejection_reason'] = 'verification failed (to/amount mismatch)'
@@ -718,12 +826,21 @@ def request_deposit():
             deposit['note'] = f'verifier error: {e}'
         save_data(data)
     elif auto_approve:
+        # auto-approve: treat currency accordingly
+        if deposit.get('currency') == 'TON':
+            price = fetch_usd_price('the-open-network') or 0
+            converted = round(deposit['amount'] * price, 8)
+            deposit['converted_amount_usdt'] = converted
+            deposit['original_amount_ton'] = deposit['amount']
+            credit_amount = converted
+        else:
+            credit_amount = round(deposit['amount'], 8)
         ensure_user(data, deposit['user_address'])
-        data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + deposit['amount'], 8)
+        data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + credit_amount, 8)
         deposit['status'] = 'approved'
         deposit['approved_by'] = 'auto'
         deposit['approved_at'] = int(time.time() * 1000)
-        data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': deposit['amount'], 'timestamp': int(time.time() * 1000)})
+        data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': credit_amount, 'timestamp': int(time.time() * 1000)})
         save_data(data)
 
     return jsonify({'ok': True, 'deposit': deposit})
@@ -795,12 +912,20 @@ def deposit_callback():
         return jsonify({'error': 'Deposit not found'}), 404
 
     if valid:
+        # If deposit was in TON, convert to USDT equivalent
+        if deposit.get('currency') == 'TON':
+            price = fetch_usd_price('the-open-network') or 0
+            converted = round(deposit.get('original_amount_ton', deposit['amount']) * price, 8)
+            deposit['converted_amount_usdt'] = converted
+            credit_amount = converted
+        else:
+            credit_amount = round(deposit['amount'], 8)
         ensure_user(data, deposit['user_address'])
-        data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + deposit['amount'], 8)
+        data['users'][deposit['user_address']]['balance'] = round(data['users'][deposit['user_address']].get('balance', 0) + credit_amount, 8)
         deposit['status'] = 'approved'
         deposit['approved_by'] = 'verifier'
         deposit['approved_at'] = int(time.time() * 1000)
-        data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': deposit['amount'], 'timestamp': int(time.time() * 1000)})
+        data['transactions'].append({'type': 'deposit_approved', 'deposit_id': deposit['id'], 'user': deposit['user_address'], 'amount': credit_amount, 'timestamp': int(time.time() * 1000)})
     else:
         deposit['status'] = 'rejected'
         deposit['rejection_reason'] = error or 'verification failed'

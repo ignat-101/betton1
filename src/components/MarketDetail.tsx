@@ -15,6 +15,22 @@ export default function MarketDetail() {
   const yesProb = market.outcomes.yes.probability;
   const noProb = market.outcomes.no.probability;
 
+  // Prepare sparkline from market.history (yes probability over time)
+  const history = (market as any).history || [];
+  const sparkPath = (() => {
+    if (!history || history.length < 2) return '';
+    const pts = history.slice(-60).sort((a: any, b: any) => a.t - b.t);
+    const w = 300; const h = 48; const maxY = 100; const minY = 0;
+    const step = w / Math.max(1, pts.length - 1);
+    let d = '';
+    pts.forEach((p: any, i: number) => {
+      const x = Math.round(i * step);
+      const y = Math.round(((maxY - (p.yes ?? 0)) / (maxY - minY)) * h);
+      d += (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`);
+    });
+    return d;
+  })();
+
   const handleBet = () => {
     const amount = Number(betAmount);
     if (!amount || amount <= 0) return;
@@ -72,6 +88,13 @@ export default function MarketDetail() {
 
         {/* Probability Display */}
         <div className="glass rounded-xl p-4 space-y-4">
+          {history && history.length > 1 && (
+            <div className="mb-2">
+              <svg viewBox="0 0 300 48" width="100%" height={48} className="rounded">
+                <path d={sparkPath} fill="none" stroke="rgba(99, 102, 241, 0.8)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          )}
           <div className="text-xs font-medium text-gray-400 uppercase tracking-wider">Вероятности</div>
           
           {/* Yes bar */}
@@ -192,31 +215,31 @@ export default function MarketDetail() {
                 type="number"
                 value={betAmount}
                 onChange={(e) => setBetAmount(e.target.value)}
-                placeholder="Сумма в звёздах ⭐"
+                placeholder="Сумма в USDT"
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 transition-colors"
               />
             </div>
 
             {/* Quick amounts */}
             <div className="flex gap-2">
-              {[50, 100, 250, 500].map(a => (
+              {[1, 5, 10, 50].map(a => (
                 <button
                   key={a}
                   onClick={() => setBetAmount(String(a))}
                   className="flex-1 py-1.5 rounded-lg text-[11px] text-gray-400 bg-white/5 hover:bg-white/10 transition-colors"
                 >
-                  {a} ⭐
+                  {a} USDT
                 </button>
               ))}
             </div>
 
-            <button
-              onClick={handleBet}
-              className="w-full py-3 rounded-lg text-sm font-medium text-white transition-colors"
-              style={{ background: betOutcome === 'yes' ? 'var(--accent-green)' : 'var(--accent-red)' }}
-            >
-              Поставить {betOutcome === 'yes' ? 'на Да' : 'на Нет'}
-            </button>
+                <button
+                  onClick={handleBet}
+                  className="w-full py-3 rounded-lg text-sm font-medium text-white transition-colors"
+                  style={{ background: betOutcome === 'yes' ? 'var(--accent-green)' : 'var(--accent-red)' }}
+                >
+                  Поставить {betOutcome === 'yes' ? 'на Да' : 'на Нет'}
+                </button>
           </div>
         )}
 

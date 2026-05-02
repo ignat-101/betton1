@@ -10,6 +10,8 @@ export default function ProfileTab() {
   const [depositAmount, setDepositAmount] = useState<number>(0);
   const [depositTx, setDepositTx] = useState('');
   const [depositMsg, setDepositMsg] = useState('');
+  const [depositCurrency, setDepositCurrency] = useState<'TON'|'USDT'>('TON');
+  const [tonUsdPrice, setTonUsdPrice] = useState<number | null>(null);
 
   const copyRef = () => {
     navigator.clipboard?.writeText(user.referralCode);
@@ -23,6 +25,12 @@ export default function ProfileTab() {
   useEffect(() => {
     fetch('/api/treasury_wallet').then(r => r.json()).then(j => setTreasury(j.treasury_wallet)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (depositCurrency === 'TON' && depositAmount > 0) {
+      fetch('/api/oracle/price/the-open-network').then(r => r.json()).then(j => setTonUsdPrice(j['the-open-network']?.usd || null)).catch(() => setTonUsdPrice(null));
+    } else setTonUsdPrice(null);
+  }, [depositCurrency, depositAmount]);
 
   return (
     <div className="flex-1 overflow-y-auto scrollbar-hide pb-24 px-4 pt-4">
@@ -45,9 +53,11 @@ export default function ProfileTab() {
           )}
         </div>
         <div className="flex items-center gap-2 p-3 rounded-lg bg-white/5">
-          <Star size={16} className="text-yellow-400" />
-          <span className="text-xl font-bold text-white">{user.balance.toLocaleString()}</span>
-          <span className="text-xs text-gray-500">звёзд</span>
+          <Wallet size={16} className="text-white" />
+          <div>
+            <div className="text-xl font-bold text-white">{user.balance.toLocaleString()}</div>
+            <div className="text-xs text-gray-500">USDT эквивалент (баланс)</div>
+          </div>
         </div>
       </div>
 
@@ -143,19 +153,32 @@ export default function ProfileTab() {
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-white">Пополнение баланса</span>
         </div>
-        <div className="text-xs text-gray-400 mb-2">Отправьте TON на адрес казны и создайте заявку на зачисление, указав tx hash и сумму.</div>
+        <div className="text-xs text-gray-400 mb-2">Отправьте TON или USDT на адрес казны и создайте заявку на зачисление, указав tx hash и сумму. TON будет конвертирован в USDT по текущему курсу.</div>
         <div className="mb-2">
           <div className="text-[10px] text-gray-500">Адрес казны</div>
           <div className="font-mono text-sm text-white break-words">{treasury || 'загрузка...'}</div>
         </div>
         <div className="grid grid-cols-2 gap-2 mb-2">
           <input type="number" value={depositAmount || ''} onChange={e => setDepositAmount(Number(e.target.value))} placeholder="Сумма" className="px-3 py-2 rounded-lg bg-neutral-900" />
+          <select value={depositCurrency} onChange={e => setDepositCurrency(e.target.value as any)} className="px-3 py-2 rounded-lg bg-neutral-900">
+            <option value="TON">TON</option>
+            <option value="USDT">USDT</option>
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
           <input type="text" value={depositTx} onChange={e => setDepositTx(e.target.value)} placeholder="Tx hash (опционально)" className="px-3 py-2 rounded-lg bg-neutral-900 font-mono" />
+          <div className="px-3 py-2 rounded-lg bg-neutral-900 text-sm text-gray-400">
+            {depositCurrency === 'TON' && depositAmount > 0 ? (
+              <span>≈ {tonUsdPrice ? (depositAmount * tonUsdPrice).toFixed(4) : '...'} USDT</span>
+            ) : depositCurrency === 'USDT' ? (
+              <span>{depositAmount} USDT</span>
+            ) : <span>Выберите сумму</span>}
+          </div>
         </div>
         <div className="flex gap-2">
           <button onClick={async () => {
             if (!depositAmount || depositAmount <= 0) { setDepositMsg('Неверная сумма'); return; }
-            const res = await fetch('/api/deposits/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_address: user.address, tx_hash: depositTx, amount: depositAmount }) });
+            const res = await fetch('/api/deposits/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_address: user.address, tx_hash: depositTx, amount: depositAmount, currency: depositCurrency }) });
             const j = await res.json();
             if (j.ok) { setDepositMsg('Заявка создана'); setDepositAmount(0); setDepositTx(''); } else { setDepositMsg(j.error || 'Ошибка'); }
           }} className="px-3 py-2 rounded-lg bg-green-600">Создать заявку</button>

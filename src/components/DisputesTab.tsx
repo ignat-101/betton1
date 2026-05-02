@@ -7,7 +7,9 @@ export default function DisputesTab() {
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [loading, setLoading] = useState(false);
   const [stakeAmount, setStakeAmount] = useState<number>(100);
+  const [title, setTitle] = useState('');
   const [reason, setReason] = useState('');
+  const [expiresAt, setExpiresAt] = useState<string>('');
 
   const fetchDisputes = async () => {
     setLoading(true);
@@ -31,9 +33,10 @@ export default function DisputesTab() {
   };
 
   const createDispute = async () => {
-    if (!reason) return;
-    await fetch('/api/disputes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market_id: null, title: 'Спор', reason, creator: user.address }) });
-    setReason('');
+    if (!title) return;
+    const expires_ts = expiresAt ? new Date(expiresAt).getTime() : 0;
+    await fetch('/api/disputes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, description: reason, expires_at: expires_ts, creator: user.address }) });
+    setTitle(''); setReason(''); setExpiresAt('');
     fetchDisputes();
   };
 
@@ -60,8 +63,10 @@ export default function DisputesTab() {
 
       <div className="mt-4">
         <h2 className="text-sm font-semibold mb-2">Создать спор</h2>
-        <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-lg bg-neutral-900" placeholder="Коротко опишите причину спора" />
-        <div className="flex gap-2 mt-2">
+        <input value={title} onChange={e => setTitle(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-neutral-900 mb-2" placeholder="Вопрос / заголовок спора" />
+        <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-lg bg-neutral-900" placeholder="Описание (доп. детали)" />
+        <div className="flex gap-2 mt-2 items-center">
+          <input type="datetime-local" value={expiresAt} onChange={e => setExpiresAt(e.target.value)} className="px-3 py-2 rounded-lg bg-neutral-900" />
           <button onClick={createDispute} className="px-3 py-2 rounded-lg bg-green-600">Создать спор</button>
         </div>
       </div>

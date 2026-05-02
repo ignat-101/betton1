@@ -16,4 +16,11 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  server: {
+    proxy: {
+      // Proxy API requests to local backend during development
+      '/api': 'http://localhost:5050',
+      '/.well-known': 'http://localhost:5050'
+    }
+  }
 });

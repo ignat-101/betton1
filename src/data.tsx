@@ -1,159 +1,70 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { useRef } from 'react';
 import type { Market, UserProfile, TabType, FilterType, Voter } from './types';
 
-const ADMIN_WALLET = 'UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0';
+const initialMarkets: Market[] = [];
 
-const initialMarkets: Market[] = [
-  {
-    id: '1',
-    title: 'BTC выше $100,000 к 1 февраля?',
-    description: 'Будет ли цена Bitcoin выше $100,000 на момент 1 февраля 2026 года по данным CoinGecko.',
-    category: 'crypto',
-    creatorAddress: 'EQAh...k3d2',
-    creatorName: 'crypto_whale',
-    createdAt: Date.now() - 86400000 * 3,
-    endDate: Date.now() + 86400000 * 5,
-    status: 'active',
-    oracleType: 'crypto',
-    oracleConfig: 'bitcoin',
-    outcomes: {
-      yes: { label: 'Да', probability: 72, pool: 15400 },
-      no: { label: 'Нет', probability: 28, pool: 5900 },
-    },
-    totalVolume: 21300,
-    voters: [],
-  },
-  {
-    id: '2',
-    title: 'ETH выше $4,500 к 15 февраля?',
-    description: 'Будет ли цена Ethereum выше $4,500 на момент 15 февраля 2026 года по данным CoinGecko.',
-    category: 'crypto',
-    creatorAddress: 'EQBx...9m1k',
-    creatorName: 'eth_trader',
-    createdAt: Date.now() - 86400000 * 1,
-    endDate: Date.now() + 86400000 * 12,
-    status: 'active',
-    oracleType: 'crypto',
-    oracleConfig: 'ethereum',
-    outcomes: {
-      yes: { label: 'Да', probability: 45, pool: 8200 },
-      no: { label: 'Нет', probability: 55, pool: 10100 },
-    },
-    totalVolume: 18300,
-    voters: [],
-  },
-  {
-    id: '3',
-    title: 'TON в топ-5 криптовалют к марту?',
-    description: 'Войдёт ли TON в топ-5 криптовалют по рыночной капитализации к 1 марта 2026 года.',
-    category: 'crypto',
-    creatorAddress: 'EQDk...7j2n',
-    creatorName: 'ton_believer',
-    createdAt: Date.now() - 86400000 * 5,
-    endDate: Date.now() + 86400000 * 30,
-    status: 'active',
-    oracleType: 'crypto',
-    oracleConfig: 'the-open-network',
-    outcomes: {
-      yes: { label: 'Да', probability: 23, pool: 4300 },
-      no: { label: 'Нет', probability: 77, pool: 14200 },
-    },
-    totalVolume: 18500,
-    voters: [],
-  },
-  {
-    id: '4',
-    title: 'Снег в Москве на Новый год?',
-    description: 'Будет ли снежный покров в Москве 31 декабря 2025 года по данным Гидрометцентра.',
-    category: 'weather',
-    creatorAddress: 'EQAr...4d1m',
-    creatorName: 'weather_man',
-    createdAt: Date.now() - 86400000 * 10,
-    endDate: Date.now() + 86400000 * 2,
-    status: 'voting',
-    oracleType: 'weather',
-    outcomes: {
-      yes: { label: 'Да', probability: 85, pool: 12700 },
-      no: { label: 'Нет', probability: 15, pool: 2200 },
-    },
-    totalVolume: 14900,
-    voters: [
-      { address: 'EQCv...2k1p', name: 'auditor_1', vote: 'yes', stake: 500, timestamp: Date.now() - 3600000 },
-      { address: 'EQDx...8n3q', name: 'auditor_2', vote: 'yes', stake: 300, timestamp: Date.now() - 1800000 },
-      { address: 'EQFz...5m7r', name: 'auditor_3', vote: 'no', stake: 200, timestamp: Date.now() - 900000 },
-    ],
-  },
-  {
-    id: '5',
-    title: 'Роскосмос запустит миссию к Луне в 2026?',
-    description: 'Официальный запуск миссии к Луне со стороны Роскосмоса в 2026 году.',
-    category: 'other',
-    creatorAddress: 'EQGl...6t9s',
-    creatorName: 'space_fan',
-    createdAt: Date.now() - 86400000 * 7,
-    endDate: Date.now() + 86400000 * 60,
-    status: 'active',
-    oracleType: 'manual',
-    outcomes: {
-      yes: { label: 'Да', probability: 12, pool: 1800 },
-      no: { label: 'Нет', probability: 88, pool: 13200 },
-    },
-    totalVolume: 15000,
-    voters: [],
-  },
-  {
-    id: '6',
-    title: 'Цена TON выше $8 к 1 марта?',
-    description: 'Будет ли цена Toncoin выше $8 на момент 1 марта 2026 года по данным CoinGecko.',
-    category: 'crypto',
-    creatorAddress: 'EQHt...1p4a',
-    creatorName: 'diamond_hands',
-    createdAt: Date.now() - 86400000 * 2,
-    endDate: Date.now() + 86400000 * 25,
-    status: 'active',
-    oracleType: 'crypto',
-    oracleConfig: 'the-open-network',
-    outcomes: {
-      yes: { label: 'Да', probability: 58, pool: 9100 },
-      no: { label: 'Нет', probability: 42, pool: 6600 },
-    },
-    totalVolume: 15700,
-    voters: [],
-  },
-  {
-    id: '7',
-    title: 'Финал Лиги Чемпионов — Реал победит?',
-    description: 'Выиграет ли Реал Мадрид финал Лиги Чемпионов УЕФА 2026.',
-    category: 'sports',
-    creatorAddress: 'EQJw...3r6b',
-    creatorName: 'football_pro',
-    createdAt: Date.now() - 86400000 * 4,
-    endDate: Date.now() + 86400000 * 45,
-    status: 'active',
-    oracleType: 'manual',
-    outcomes: {
-      yes: { label: 'Да', probability: 34, pool: 5400 },
-      no: { label: 'Нет', probability: 66, pool: 10500 },
-    },
-    totalVolume: 15900,
-    voters: [],
-  },
-];
-
-const mockUser: UserProfile = {
-  address: ADMIN_WALLET,
-  name: 'flash_user',
-  balance: 2500,
-  reputation: 87,
-  totalBets: 24,
-  wins: 16,
-  losses: 8,
-  referralCode: 'FLASH2026',
-  referrals: 7,
-  referralEarnings: 350,
+const initialUser: UserProfile = {
+  address: '',
+  name: 'guest',
+  balance: 0,
+  reputation: 50,
+  totalBets: 0,
+  wins: 0,
+  losses: 0,
+  referralCode: '',
+  referrals: 0,
+  referralEarnings: 0,
   bets: [],
-  isAdmin: true,
+  isAdmin: false,
 };
+
+function mapBackendUserToProfile(u: any): UserProfile {
+  if (!u) return initialUser;
+  return {
+    address: u.address || u.addr || '',
+    name: u.name || 'anonymous',
+    balance: Number(u.balance || 0),
+    reputation: Number(u.reputation || 50),
+    totalBets: Number(u.total_bets ?? u.totalBets ?? 0),
+    wins: Number(u.wins ?? 0),
+    losses: Number(u.losses ?? 0),
+    referralCode: u.referralCode || u.referral_code || '',
+    referrals: Number(u.referrals ?? 0),
+    referralEarnings: Number(u.referralEarnings ?? u.referral_earnings ?? 0),
+    bets: u.bets || [],
+    isAdmin: Boolean(u.is_admin || u.isAdmin),
+  };
+}
+
+function mapBackendMarketToMarket(m: any): Market {
+  const outcomesRaw = m.outcomes || m['outcomes'] || {
+    yes: { label: 'Да', probability: 50, pool: 0 },
+    no: { label: 'Нет', probability: 50, pool: 0 },
+  };
+  const yes = outcomesRaw.yes || outcomesRaw['yes'] || { label: 'Да', probability: 50, pool: 0 };
+  const no = outcomesRaw.no || outcomesRaw['no'] || { label: 'Нет', probability: 50, pool: 0 };
+  return {
+    id: m.id || m['id'] || String(Date.now()),
+    title: m.title || m['title'] || '',
+    description: m.description || m['description'] || '',
+    category: m.category || m['category'] || 'other',
+    creatorAddress: m.creatorAddress || m['creator_address'] || m.creator_address || '',
+    creatorName: m.creatorName || m['creator_name'] || m.creator_name || 'anonymous',
+    createdAt: m.createdAt || m['created_at'] || Date.now(),
+    endDate: m.endDate || m['endDate'] || m['end_date'] || 0,
+    status: m.status || 'active',
+    oracleType: (m.oracleType || m['oracle_type'] || 'manual') as Market['oracleType'],
+    oracleConfig: m.oracleConfig || m['oracle_config'] || undefined,
+    outcomes: {
+      yes: { label: yes.label || 'Да', probability: Number(yes.probability || 50), pool: Number(yes.pool || 0) },
+      no: { label: no.label || 'Нет', probability: Number(no.probability || 50), pool: Number(no.pool || 0) },
+    },
+    totalVolume: Number(m.totalVolume || m['total_volume'] || 0),
+    voters: m.voters || m['voters'] || [],
+    history: m.history || m['history'] || [],
+  };
+}
 
 interface AppState {
   markets: Market[];
@@ -168,11 +79,14 @@ interface AppContextValue extends AppState {
   setActiveTab: (tab: TabType) => void;
   setFilter: (filter: FilterType) => void;
   selectMarket: (market: Market | null) => void;
-  placeBet: (marketId: string, outcome: 'yes' | 'no', amount: number) => void;
-  createMarket: (market: Omit<Market, 'id' | 'createdAt' | 'outcomes' | 'totalVolume' | 'voters' | 'status'>) => void;
-  voteOnMarket: (marketId: string, vote: 'yes' | 'no') => void;
-  resolveMarket: (marketId: string, result: 'yes' | 'no') => void;
+  placeBet: (marketId: string, outcome: 'yes' | 'no', amount: number) => Promise<void>;
+  createMarket: (market: Omit<Market, 'id' | 'createdAt' | 'outcomes' | 'totalVolume' | 'voters' | 'status'>) => Promise<void>;
+  voteOnMarket: (marketId: string, vote: 'yes' | 'no') => Promise<void>;
+  resolveMarket: (marketId: string, result: 'yes' | 'no') => Promise<void>;
   setShowAdmin: (show: boolean) => void;
+  connectWallet: () => void;
+  disconnectWallet: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -185,83 +99,159 @@ export function useApp() {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [markets, setMarkets] = useState<Market[]>(initialMarkets);
-  const [user] = useState<UserProfile>(mockUser);
+  const [user, setUser] = useState<UserProfile>(initialUser);
   const [activeTab, setActiveTab] = useState<TabType>('markets');
   const [filter, setFilter] = useState<FilterType>('all');
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [walletAddress, setWalletAddress] = useState<string>(() => localStorage.getItem('walletAddress') || '');
+  const tonRef = useRef<any>(null);
+
+  const fetchMarkets = useCallback(async () => {
+    try {
+      const res = await fetch('/api/markets');
+      if (!res.ok) throw new Error('Failed to fetch markets');
+      const j = await res.json();
+      const list = (j.markets || []).map(mapBackendMarketToMarket);
+      setMarkets(list);
+    } catch (e) {
+      console.error('fetchMarkets error', e);
+      setMarkets(initialMarkets);
+    }
+  }, []);
+
+  useEffect(() => { fetchMarkets(); }, [fetchMarkets]);
+
+  const fetchUser = useCallback(async (address: string) => {
+    try {
+      const res = await fetch(`/api/user/${address}`);
+      if (!res.ok) throw new Error('Failed to fetch user');
+      const j = await res.json();
+      setUser(mapBackendUserToProfile(j));
+    } catch (e) {
+      console.error('fetchUser error', e);
+      setUser(initialUser);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (walletAddress) {
+      localStorage.setItem('walletAddress', walletAddress);
+      fetchUser(walletAddress);
+    } else {
+      localStorage.removeItem('walletAddress');
+      setUser(initialUser);
+    }
+  }, [walletAddress, fetchUser]);
+
+  const connectWallet = useCallback(async () => {
+    // Try dynamic import of TonConnect SDK; if not available, fallback to prompt
+    try {
+      const mod = await import('@tonconnect/sdk');
+      const { TonConnect } = mod as any;
+      const ton = new TonConnect({ manifestUrl: '/.well-known/ton-connect.json' });
+      tonRef.current = ton;
+      // if already connected
+      if ((ton as any).account && (ton as any).account.address) {
+        setWalletAddress((ton as any).account.address);
+        return;
+      }
+      const session = await (ton as any).connect();
+      const account = (session && (session.account || (ton as any).account && (ton as any).account.address)) || '';
+      if (account) setWalletAddress(account);
+    } catch (e) {
+      const addr = window.prompt('Введите адрес TON (или вставьте ваш кошелёк)');
+      if (addr) setWalletAddress(addr.trim());
+    }
+  }, []);
+
+  const disconnectWallet = useCallback(() => {
+    try { tonRef.current?.disconnect?.(); } catch (e) { /* ignore */ }
+    setWalletAddress('');
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    if (walletAddress) await fetchUser(walletAddress);
+  }, [walletAddress, fetchUser]);
 
   const selectMarket = useCallback((market: Market | null) => {
     setSelectedMarket(market);
   }, []);
 
-  const placeBet = useCallback((marketId: string, outcome: 'yes' | 'no', amount: number) => {
-    setMarkets(prev => prev.map(m => {
-      if (m.id !== marketId) return m;
-      const updated = { ...m };
-      if (outcome === 'yes') {
-        updated.outcomes = {
-          yes: { ...m.outcomes.yes, pool: m.outcomes.yes.pool + amount },
-          no: { ...m.outcomes.no },
-        };
+  const placeBet = useCallback(async (marketId: string, outcome: 'yes' | 'no', amount: number) => {
+    if (!walletAddress) { alert('Пожалуйста, подключите кошелёк'); return; }
+    try {
+      const res = await fetch(`/api/markets/${marketId}/bet`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ outcome, amount, user_address: walletAddress })
+      });
+      const j = await res.json();
+      if (j.market) {
+        setMarkets(prev => prev.map(m => m.id === marketId ? mapBackendMarketToMarket(j.market) : m));
+        await refreshUser();
       } else {
-        updated.outcomes = {
-          yes: { ...m.outcomes.yes },
-          no: { ...m.outcomes.no, pool: m.outcomes.no.pool + amount },
-        };
+        alert(j.error || 'Ошибка при ставке');
       }
-      updated.totalVolume = updated.outcomes.yes.pool + updated.outcomes.no.pool;
-      const yesPool = updated.outcomes.yes.pool;
-      const noPool = updated.outcomes.no.pool;
-      const total = yesPool + noPool;
-      updated.outcomes.yes.probability = Math.round((yesPool / total) * 100);
-      updated.outcomes.no.probability = 100 - updated.outcomes.yes.probability;
-      return updated;
-    }));
-  }, []);
+    } catch (e) {
+      console.error(e);
+      alert('Ошибка сети при размещении ставки');
+    }
+  }, [walletAddress, refreshUser]);
 
-  const createMarket = useCallback((market: Omit<Market, 'id' | 'createdAt' | 'outcomes' | 'totalVolume' | 'voters' | 'status'>) => {
-    const newMarket: Market = {
-      ...market,
-      id: String(Date.now()),
-      createdAt: Date.now(),
-      outcomes: {
-        yes: { label: 'Да', probability: 50, pool: 0 },
-        no: { label: 'Нет', probability: 50, pool: 0 },
-      },
-      totalVolume: 0,
-      voters: [],
-      status: 'active',
-    };
-    setMarkets(prev => [newMarket, ...prev]);
-  }, []);
-
-  const voteOnMarket = useCallback((marketId: string, vote: 'yes' | 'no') => {
-    setMarkets(prev => prev.map(m => {
-      if (m.id !== marketId) return m;
-      const voter: Voter = {
-        address: user.address,
-        name: user.name,
-        vote,
-        stake: 100,
-        timestamp: Date.now(),
+  const createMarket = useCallback(async (market: Omit<Market, 'id' | 'createdAt' | 'outcomes' | 'totalVolume' | 'voters' | 'status'>) => {
+    try {
+      const payload = {
+        title: market.title,
+        description: market.description,
+        category: market.category,
+        creator_address: walletAddress || market.creatorAddress || '',
+        creator_name: market.creatorName || 'anonymous',
+        end_date: market.endDate,
+        oracle_type: market.oracleType,
+        oracle_config: market.oracleConfig,
       };
-      return { ...m, voters: [...m.voters, voter], status: 'voting' as const };
-    }));
-  }, [user]);
+      const res = await fetch('/api/markets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = await res.json();
+      if (j.market) {
+        setMarkets(prev => [mapBackendMarketToMarket(j.market), ...prev]);
+      } else {
+        alert(j.error || 'Ошибка создания рынка');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Ошибка сети при создании рынка');
+    }
+  }, [walletAddress]);
 
-  const resolveMarket = useCallback((marketId: string, result: 'yes' | 'no') => {
-    setMarkets(prev => prev.map(m => {
-      if (m.id !== marketId) return m;
-      return { ...m, status: 'resolved' as const, resolution: result, resolvedAt: Date.now() };
-    }));
-  }, []);
+  const voteOnMarket = useCallback(async (marketId: string, vote: 'yes' | 'no') => {
+    if (!walletAddress) { alert('Подключите кошелёк'); return; }
+    try {
+      const res = await fetch(`/api/markets/${marketId}/vote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_address: walletAddress, user_name: user.name, vote, stake: 100 }) });
+      const j = await res.json();
+      if (j.ok) {
+        // refetch markets
+        await fetchMarkets();
+        await refreshUser();
+      } else alert(j.error || 'Ошибка голосования');
+    } catch (e) { console.error(e); alert('Ошибка сети при голосовании'); }
+  }, [walletAddress, user.name, fetchMarkets, refreshUser]);
+
+  const resolveMarket = useCallback(async (marketId: string, result: 'yes' | 'no') => {
+    if (!walletAddress) { alert('Подключите кошелёк'); return; }
+    try {
+      const res = await fetch(`/api/markets/${marketId}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ admin_address: walletAddress, result }) });
+      const j = await res.json();
+      if (j.ok) {
+        await fetchMarkets();
+      } else alert(j.error || 'Ошибка резолва');
+    } catch (e) { console.error(e); alert('Ошибка сети при резолве'); }
+  }, [walletAddress, fetchMarkets]);
 
   return (
     <AppContext.Provider value={{
       markets, user, activeTab, filter, selectedMarket, showAdmin,
       setActiveTab, setFilter, selectMarket, placeBet, createMarket,
-      voteOnMarket, resolveMarket, setShowAdmin,
+      voteOnMarket, resolveMarket, setShowAdmin, connectWallet, disconnectWallet, refreshUser,
     }}>
       {children}
     </AppContext.Provider>
