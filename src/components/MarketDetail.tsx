@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useApp } from '../data';
-import { ArrowLeft, Clock, Users, CheckCircle, AlertTriangle, Vote } from 'lucide-react';
+import { ArrowLeft, Clock, Users, CheckCircle, AlertTriangle, Vote, BarChart3 } from 'lucide-react';
 
 export default function MarketDetail() {
-  const { selectedMarket: market, selectMarket, placeBet, voteOnMarket, user } = useApp();
+  const { selectedMarket: market, selectMarket, placeBet, voteOnMarket, user, setShowProbabilityView } = useApp();
   const [betOutcome, setBetOutcome] = useState<'yes' | 'no'>('yes');
   const [betAmount, setBetAmount] = useState('');
   const [showVote, setShowVote] = useState(false);
@@ -89,6 +89,17 @@ export default function MarketDetail() {
           <span>Объём: ${market.totalVolume.toLocaleString()}</span>
           <span className="flex items-center gap-1"><Users size={12} /> {market.voters.length}</span>
         </div>
+
+        {/* Probability Chart Button */}
+        {(market as any).history && (market as any).history.length > 1 && (
+          <button
+            onClick={() => setShowProbabilityView(true)}
+            className="w-full py-2 rounded-lg text-sm font-medium bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-colors flex items-center justify-center gap-2"
+          >
+            <BarChart3 size={14} />
+            Анализ вероятностей
+          </button>
+        )}
 
         {/* Probability Display */}
         <div className="glass rounded-xl p-4 space-y-4">

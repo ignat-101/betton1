@@ -11,20 +11,11 @@ const categories = [
   { id: 'other', label: 'Другое' },
 ];
 
-const oracleTypes = [
-  { id: 'crypto', label: 'Криптовалюта (CoinGecko)', hasConfig: true },
-  { id: 'manual', label: 'Ручная проверка', hasConfig: false },
-  { id: 'weather', label: 'Погода', hasConfig: false },
-  { id: 'other', label: 'Другое', hasConfig: false },
-];
-
 export default function CreateBetTab() {
   const { createMarket, user } = useApp();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('crypto');
-  const [oracleType, setOracleType] = useState('crypto');
-  const [oracleConfig, setOracleConfig] = useState('');
   const [endDate, setEndDate] = useState('');
   const [created, setCreated] = useState(false);
 
@@ -38,8 +29,8 @@ export default function CreateBetTab() {
       creatorAddress: user.address,
       creatorName: user.name,
       endDate: new Date(endDate).getTime(),
-      oracleType: oracleType as Market['oracleType'],
-      oracleConfig: oracleConfig || undefined,
+      oracleType: 'manual',
+      oracleConfig: undefined,
     });
 
     setCreated(true);
@@ -48,7 +39,6 @@ export default function CreateBetTab() {
       setTitle('');
       setDescription('');
       setEndDate('');
-      setOracleConfig('');
     }, 2500);
   };
 
@@ -70,7 +60,7 @@ export default function CreateBetTab() {
     <div className="flex-1 overflow-y-auto scrollbar-hide pb-24 px-4 pt-4">
       <div className="mb-4">
         <h1 className="text-lg font-semibold text-white">Создать рынок</h1>
-        <p className="text-xs text-gray-500 mt-0.5">Создайте ставку на любое событие</p>
+        <p className="text-xs text-gray-500 mt-0.5">Спросите, опишите, установите срок. Разрешение — через споры и голосование.</p>
       </div>
 
       <div className="space-y-4">
@@ -117,40 +107,6 @@ export default function CreateBetTab() {
             ))}
           </div>
         </div>
-
-        {/* Oracle Type */}
-        <div>
-          <label className="text-xs font-medium text-gray-400 block mb-1.5">Тип проверки</label>
-          <div className="space-y-1.5">
-            {oracleTypes.map(({ id, label }) => (
-              <button
-                key={id}
-                onClick={() => setOracleType(id)}
-                className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
-                  oracleType === id
-                    ? 'bg-white/10 text-white'
-                    : 'bg-white/5 text-gray-500'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Oracle Config (for crypto) */}
-        {oracleType === 'crypto' && (
-          <div>
-            <label className="text-xs font-medium text-gray-400 block mb-1.5">Монета (CoinGecko ID)</label>
-            <input
-              type="text"
-              value={oracleConfig}
-              onChange={(e) => setOracleConfig(e.target.value)}
-              placeholder="bitcoin, ethereum, the-open-network..."
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-white/20 transition-colors"
-            />
-          </div>
-        )}
 
         {/* End Date */}
         <div>

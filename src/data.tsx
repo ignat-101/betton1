@@ -73,12 +73,14 @@ interface AppState {
   filter: FilterType;
   selectedMarket: Market | null;
   showAdmin: boolean;
+  showProbabilityView: boolean;
 }
 
 interface AppContextValue extends AppState {
   setActiveTab: (tab: TabType) => void;
   setFilter: (filter: FilterType) => void;
   selectMarket: (market: Market | null) => void;
+  setShowProbabilityView: (show: boolean) => void;
   placeBet: (marketId: string, outcome: 'yes' | 'no', amount: number) => Promise<void>;
   createMarket: (market: Omit<Market, 'id' | 'createdAt' | 'outcomes' | 'totalVolume' | 'voters' | 'status'>) => Promise<void>;
   voteOnMarket: (marketId: string, vote: 'yes' | 'no') => Promise<void>;
@@ -104,6 +106,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [filter, setFilter] = useState<FilterType>('all');
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showProbabilityView, setShowProbabilityView] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string>(() => localStorage.getItem('walletAddress') || '');
   const tonRef = useRef<any>(null);
 
@@ -145,21 +148,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [walletAddress, fetchUser]);
 
   const connectWallet = useCallback(async () => {
-    // Try dynamic import of TonConnect SDK; if not available, fallback to prompt
+    // Try real TonConnect integration; fallback to manual input
     try {
       const mod = await import('@tonconnect/sdk');
       const { TonConnect } = mod as any;
-      const ton = new TonConnect({ manifestUrl: 'https://bet-ton.onrender.com/.well-known/ton-connect.json' });
+      
+      const ton = new TonConnect({ 
+        manifestUrl: 'https://bet-ton.onrender.com/.well-known/ton-connect.json',
+        walletsListSource: 'https://tonconnect.github.io/wallets-list/json/wallets-list.json'
+      });
+      
       tonRef.current = ton;
-      // if already connected
-      if ((ton as any).account && (ton as any).account.address) {
-        setWalletAddress((ton as any).account.address);
-        return;
+      
+      // Try to restore existing session
+      const wallets = await ton.getWallets();
+      if (wallets && wallets.length > 0) {
+        try {
+          const wallet = wallets[0];
+          const connection = await ton.connect(wallet);
+          if (connection && connection.account && connection.account.address) {
+            setWalletAddress(connection.account.address);
+            return;
+          }
+        } catch (connectErr) {
+          // If connect fails, show prompt instead
+          console.warn('TonConnect failed:', connectErr);
+        }
       }
-      const session = await (ton as any).connect();
-      const account = (session && (session.account || (ton as any).account && (ton as any).account.address)) || '';
-      if (account) setWalletAddress(account);
+      
+      // Fallback to manual address input
+      const addr = window.prompt('Введите адрес TON кошелька (или используйте расширение TonKeeper)');
+      if (addr) setWalletAddress(addr.trim());
     } catch (e) {
+      // If SDK not available, use manual prompt
+      console.warn('TonConnect SDK unavailable, using manual input');
       const addr = window.prompt('Введите адрес TON (или вставьте ваш кошелёк)');
       if (addr) setWalletAddress(addr.trim());
     }
@@ -249,8 +271,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      markets, user, activeTab, filter, selectedMarket, showAdmin,
-      setActiveTab, setFilter, selectMarket, placeBet, createMarket,
+      markets, user, activeTab, filter, selectedMarket, showAdmin, showProbabilityView,
+      setActiveTab, setFilter, selectMarket, setShowProbabilityView, placeBet, createMarket,
       voteOnMarket, resolveMarket, setShowAdmin, connectWallet, disconnectWallet, refreshUser,
     }}>
       {children}
