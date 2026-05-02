@@ -30,23 +30,58 @@ Telegram Mini App с тремя вкладками:
 
 ---
 
-## 🚀 Деплой на Render.com (инструкции)
+## 🚀 Деплой на Render.com
 
-Процесс автоматического деплоя на Render проще всего настроить через `render.yaml`, который уже присутствует в репозитории. Ниже — пошаговая инструкция и проверки, которые я добавил в репозиторий.
+📖 **Полная инструкция** находится в файле [RENDER_SETUP.md](RENDER_SETUP.md)
 
-### 1) Автоматический деплой через `render.yaml`
+### Быстро:
+1. Залей код в GitHub (уже готово)
+2. На Render создай Web Service → Connect to GitHub репозиторий
+3. Build Command: `npm install && npm run build && pip install -r backend/requirements.txt`
+4. Start Command: `gunicorn --chdir backend app:app --timeout 120`
+5. Добавь переменные окружения (см. [.env.example](.env.example))
+6. Deploy!
 
-1. Залейте код в GitHub (уже сделано автоматически при создании репозитория ниже).
+### Настройка переменных окружения:
+```
+ADMIN_WALLET=UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0
+TREASURY_WALLET=UQCfdyrb0Fj8lA32OfizTwGY829tTzihsEYl1FrpBzeVKdi0
+AUTO_SEND_PAYOUTS=false
+AUTO_APPROVE_DEPOSITS=false
+PORT=10000
+```
 
-2. На Render: **New → Web Service → Connect a repository** и выберите `betton1`.
+---
 
-3. Render использует `render.yaml` для конфигурации. В `render.yaml` уже прописаны:
-   - `buildCommand`: `pip install -r backend/requirements.txt && cd .. && npm install && npm run build && cp -r dist backend/dist`
-   - `startCommand`: `cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --workers 2`
-   - `PYTHON_VERSION: "3.11.0"`, `NODE_VERSION: "20.0.0"`
+## 💾 Локальная разработка
 
-4. В Render Dashboard добавьте секреты/переменные окружения (лучше как Secrets):
-   - `ADMIN_WALLET` — ваш админ-кошелёк (рекомендую задать как Secret, а не хранить в `render.yaml`).
+### Установка
+
+```bash
+# Фронтенд (Node.js)
+npm install
+
+# Бэкенд (Python 3.8+)
+pip install -r backend/requirements.txt
+```
+
+### Запуск
+
+```bash
+# В одном терминале — фронтенд (Vite на http://localhost:5173)
+npm run dev
+
+# В другом — бэкенд (Flask на http://localhost:5050)
+cd backend
+python app.py
+```
+
+### Конфигурация
+
+Скопируй `.env.example` в `.env` и измени значения:
+```bash
+cp .env.example .env
+```
 
 5. Включите `Auto Deploy` (Deploy on push) для ветки `main`.
 
