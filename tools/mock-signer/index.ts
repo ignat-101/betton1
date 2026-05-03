@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import { TonClient, WalletContractV4, beginCell } from '@ton/ton';
+import { TonClient4, WalletContractV4, internal, beginCell } from '@ton/ton';
 import { mnemonicToPrivateKey } from '@ton/crypto';
 
 dotenv.config();
@@ -10,71 +10,88 @@ const app = express();
 app.use(bodyParser.json());
 
 const RPC_ENDPOINT = process.env.TON_RPC || 'https://testnet.toncenter.com/api/v2/jsonRPC';
-const PRIVATE_KEY = process.env.TOOLS_MOCK_SIGNER_PRIVATE_KEY!;
+const PRIVATE_KEY_MNEMONIC = process.env.TOOLS_MOCK_SIGNER_PRIVATE_KEY!; // 24 words or hex
 const API_KEY = process.env.TON_API_KEY!;
 
-let client: TonClient;
-let walletContract: WalletContractV4;
+let client: TonClient4;
+let wallet: WalletContractV4;
 let keyPair: Awaited<ReturnType<typeof mnemonicToPrivateKey>>;
 
-async function initWallet() {
-  client = new TonClient({
-    endpoint: RPC_ENDPOINT,
-    apiKey: API_KEY
-  });
+async function initSigner() {
+  client = new TonClient4({ endpoint: RPC_ENDPOINT });
 
-  keyPair = await mnemonicToPrivateKey(PRIVATE_KEY.split(' '));
-  walletContract = WalletContractV4.create({ 
+  // Support both mnemonic words and hex seed
+  const wordsArray = PRIVATE_KEY_MNEMONIC.trim().split(/\\s+/);
+  keyPair = await mnemonicToPrivateKey(wordsArray.length === 1 ? [PRIVATE_KEY_MNEMONIC] : wordsArray);
+  
+  wallet = WalletContractV4R2.create({ 
     workchain: 0, 
     publicKey: keyPair.publicKey 
   });
   
-  console.log('✅ Signer wallet:', walletContract.address.toString());
-  console.log('💰 Balance:', (await client.getBalance(walletContract.address)).toString());
+  // Balance skip TS errors for Render
+  console.log('✅ Signer:', wallet.address.toString());
 }
 
 app.post('/send', async (req: Request, res: Response) => {
   const { to, amount, payout_id } = req.body;
   
-  if (!to || !amount || amount > 100) {
-    return res.status(400).json({ error: 'Invalid amount (max 100 TON)' });
+  if (!to || typeof amount !== 'number' || amount <= 0 || amount > 100) {
+    return res.status(400).json({ error: 'Invalid payout: max 100 TON' });
   }
 
   try {
-    const nanoAmount = BigInt(Math.floor(amount * 1e9));
+    const seqno = await client.open(wallet).getSeqno();
+    const nanoTON = BigInt(Math.floor(amount * 1_000_000_000));
     
-    const walletOpened = client.open(walletContract);
-    const seqno = await walletOpened.getSeqno();
+    // Comment payload
+    const payload = beginCell()
+      .storeUint(0, 32)
+      .storeStringTail(`betton payout #${payout_id}`)
+      .endCell();
     
-    const transferBody = beginCell().storeStringTail(`betton payout #${payout_id}`).endCell();
-    
-    await walletContract.sendTransfer(client, {
-      seqno,
-      secretKey: keyPair.secretKey,
-      messages: [ {
-        address: to,
-        amount: nanoAmount,
-        payload: transferBody,
-      }],
-    });
+    // Send transaction
+    const result = await wallet.send(
+      await client.open(wallet),
+      {
+        seqno,
+        secretKey: keyPair.secretKey,
+        messages: [
+          internal({
+            to,
+            value: nanoTON,
+            body: payload,
+          })
+        ]
+      }
+    );
 
-    console.log(`✅ Payout sent: #${payout_id} → ${to} ${amount}TON`);
-    console.log(`Tx: https://testnet.tonscan.org/tx/${result}`);
+    console.log(`✅ SENT: ${amount}TON → ${to} #${payout_id}`);
+    console.log(`🔗 https://testnet.tonscan.org/tx/${result}`);
     
     res.json({ 
-      tx_hash: result,
-      status: 'sent' 
+      tx_hash: result, 
+      status: 'sent',
+      explorer: `https://testnet.tonscan.org/tx/${result}`
     });
   } catch (error: any) {
-    console.error('❌ Send error:', error.message);
+    console.error('❌ ERROR:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-initWallet().then(() => {
+app.get('/health', (req, res) => {
+  res.json({ status: 'ready', wallet: wallet.address.toString() });
+});
+
+initSigner().then(() => {
   app.listen(3001, () => {
-    console.log('🚀 Real TON Signer: http://localhost:3001/send');
-    console.log('⚠️  PRIVATE KEY в .env - НИКОМУ НЕ ДАВАЙ!');
+    console.log('🚀 TON Payout Signer: http://localhost:3001/send');
+    console.log('✅ Health: http://localhost:3001/health');
   });
-}).catch(console.error);
+}).catch(err => {
+  console.error('💥 Init failed:', err);
+  process.exit(1);
+});
+
 

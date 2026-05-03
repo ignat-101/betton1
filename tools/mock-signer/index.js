@@ -1,17 +1,35 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const crypto = require('crypto');
+require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
 
-app.post('/sign', (req, res) => {
-  const { to, amount, payout_id } = req.body || {};
-  console.log('Mock signer received', { to, amount, payout_id });
-  // simulate signing and broadcasting
-  const tx_hash = 'mocktx_' + crypto.randomBytes(8).toString('hex');
-  // return tx_hash immediately
-  res.json({ tx_hash });
+app.post('/send', async (req, res) => {
+  const { to, amount, payout_id } = req.body;
+  
+  if (!to || !amount || amount > 100) {
+    return res.status(400).json({ error: 'Invalid amount (max 100 TON)' });
+  }
+
+  // Mock TX for Render demo (replace with real TON later)
+  const tx_hash = `mock_${payout_id}_${Date.now()}`;
+  
+  console.log(`✅ Mock payout: ${amount}TON → ${to} #${payout_id}`);
+  
+  res.json({ 
+    tx_hash,
+    status: 'sent',
+    explorer: 'https://testnet.tonscan.org/tx/' + tx_hash 
+  });
 });
 
-app.listen(3001, () => console.log('Mock signer running on http://localhost:3001'));
+app.get('/health', (req, res) => {
+  res.json({ status: 'ready' });
+});
+
+const port = process.env.PORT || 3001;
+app.listen(port, () => {
+  console.log(`🚀 TON Signer ready: http://localhost:${port}/send`);
+});
+
