@@ -894,6 +894,92 @@ def reject_deposit(deposit_id):
     return jsonify({'ok': True, 'deposit': deposit})
 
 
+@app.route('/api/auto-scan-deposits', methods=['POST'])
+def auto_scan_deposits():
+    """Auto-scan recent TX to treasury for betton deposits"""
+    import urllib.request
+    import json
+    import re
+    
+    data = load_data()
+    treasury = TREASURY_WALLET
+    api_key = os.environ.get('TON_API_KEY')
+    
+    if not api_key:
+        return jsonify({'error': 'TON_API_KEY not set'}), 500
+    
+    # Get recent transactions to treasury
+    url = f"https://testnet.toncenter.com/api/v2/getTransactions?address={treasury}&limit=20"
+    req = urllib.request.Request(url, headers={'X-API-Key': api_key})
+    
+    try:
+        with urllib.request.urlopen(req) as resp:
+            txs = json.loads(resp.read())['result']
+    except:
+        return jsonify({'error': 'TonAPI error'}), 500
+    
+    scanned = 0
+    for tx in txs:
+        lt = tx['transaction_id']['lt']
+        hash = tx['transaction_id']['hash']
+        
+        # Skip if already processed
+        if any(d.get('tx_lt') == lt for d in data['deposits']):
+            continue
+            
+        # Check if in-message to treasury has betton payload
+        for in_msg in tx.get('in_msg', {}).get('source', []):
+            msg = in_msg.get('message', '')
+            if 'betton:' in msg:
+                # Parse user_address from payload
+                user_match = re.search(r'betton:([EQ][A-Za-z0-9_-]{35,48})', msg)
+                if user_match:
+                    user_addr = user_match.group(1)
+                    ton_amount = int(tx.get('in_msg', {}).get('value', 0)) / 1e9
+                    
+                    if ton_amount > 0.01 and ton_amount <= 100:
+                        price = fetch_usd_price('the-open-network') or 5.5
+                        usdt_amount = round(ton_amount * price, 4)
+                        
+                        deposit = {
+                            'id': secrets.token_hex(8),
+                            'user_address': user_addr,
+                            'to_address': treasury,
+                            'tx_hash': hash,
+                            'tx_lt': lt,
+                            'amount': usdt_amount,
+                            'currency': 'TON',
+                            'original_amount_ton': ton_amount,
+                            'converted_amount_usdt': usdt_amount,
+                            'status': 'approved',
+                            'approved_by': 'tonapi-auto',
+                            'approved_at': int(tx['utime'] * 1000),
+                            'created_at': int(tx['utime'] * 1000)
+                        }
+                        
+                        data['deposits'].append(deposit)
+                        ensure_user(data, user_addr)
+                        data['users'][user_addr]['balance'] = round(
+                            data['users'][user_addr].get('balance', 0) + usdt_amount, 4
+                        )
+                        
+                        data['transactions'].append({
+                            'type': 'deposit_auto',
+                            'deposit_id': deposit['id'],
+                            'user': user_addr,
+                            'ton_amount': ton_amount,
+                            'usdt_amount': usdt_amount,
+                            'tx_hash': hash,
+                            'timestamp': deposit['approved_at']
+                        })
+                        
+                        scanned += 1
+                        print(f"✅ AUTO DEPOSIT: {user_addr[:8]}... {ton_amount}TON → {usdt_amount}USDT")
+        
+        save_data(data)
+        
+    return jsonify({'scanned': scanned, 'new_deposits': scanned})
+
 @app.route('/api/deposits/callback', methods=['POST'])
 def deposit_callback():
     """Callback endpoint for external verifier to mark deposits approved/rejected.
