@@ -1,0 +1,22 @@
+name: TON Auto Deposit Scanner
+
+on:
+  schedule:
+    - cron: '*/2 * * * *'  # каждые 2 минуты
+  workflow_dispatch:  # manual run button
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Scan deposits
+      run: |
+        curl -X POST https://bet-ton.onrender.com/api/auto-scan-deposits \
+          -H "Content-Type: application/json" \
+          -d '{}'
+        
+    - name: Notify
+      if: always()
+      run: |
+        echo "✅ Auto-scan completed: $(date)"
+
