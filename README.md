@@ -30,9 +30,33 @@ Telegram Mini App с тремя вкладками:
 
 ---
 
-## 🚀 Деплой на Render.com
+## 🚀 Деплой на Render.com (Автоматический)
 
-📖 **Полная инструкция** находится в файле [RENDER_SETUP.md](RENDER_SETUP.md)
+### Быстрый деплой (5 минут):
+
+1. **Push в GitHub:**
+```bash
+git add .
+git commit -m "Update betton with full instructions"
+git push origin main
+```
+
+2. **Render Dashboard:**
+   - New → Web Service → Connect GitHub repo
+   - Build: `npm install && npm run build && pip install -r backend/requirements.txt`
+   - Start: `gunicorn --chdir backend app:app --timeout 120`
+   - Env vars из `.env.example` (замените кошельки!)
+
+3. **Deploy!** URL: `https://your-betton.onrender.com`
+
+### Production Signer:
+
+Разверните `tools/ton-payout-signer` как отдельный сервис:
+```
+PAYOUT_SIGNER_URL=https://ton-payout-signer.onrender.com/sign
+```
+
+**Полная инструкция:** [RENDER_SETUP.md](RENDER_SETUP.md)
 
 ### Быстро:
 1. Залей код в GitHub (уже готово)
@@ -53,27 +77,76 @@ PORT=10000
 
 ---
 
-## 💾 Локальная разработка
+## 💾 Локальная разработка (Полная инструкция)
 
-### Установка
+### 1. Клонирование и установка
 
 ```bash
-# Фронтенд (Node.js)
+# Основной проект уже есть локально
+# Дополнительные репозитории:
+git clone https://github.com/ignat-101/ton-payout-signer.git tools/ton-payout-signer
+# betton1 уже клонирован (видно в git history)
+```
+
+### 2. Установка зависимостей
+
+```bash
+# Фронтенд + инструменты (Node.js 18+)
 npm install
 
 # Бэкенд (Python 3.8+)
 pip install -r backend/requirements.txt
+
+# Mock signer (для тестов)
+cd tools/mock-signer
+npm install
+cd ../..
+
+# TON Payout Signer (production)
+cd tools/ton-payout-signer
+npm install  # или pip install -r requirements.txt (зависит от репозитория)
+cd ../..
 ```
 
-### Запуск
+### 3. Конфигурация
 
 ```bash
-# В одном терминале — фронтенд (Vite на http://localhost:5173)
-npm run dev
+cp .env.example .env
+# Отредактируйте .env под свои кошельки!
+```
 
-# В другом — бэкенд (Flask на http://localhost:5050)
-cd backend
-python app.py
+### 4. Запуск (3 терминала)
+
+**Терминал 1 — Mock Signer (тестовые выплаты):**
+```bash
+cd tools/mock-signer
+PAYOUT_SIGNER_URL=http://localhost:3001/sign npm start
+# Доступно: http://localhost:3001
+```
+
+**Терминал 2 — Backend:**
+```bash
+PAYOUT_SIGNER_URL=http://localhost:3001/sign \
+AUTO_SEND_PAYOUTS=true \
+python backend/app.py
+# Backend: http://localhost:5000
+```
+
+**Терминал 3 — Frontend:**
+```bash
+npm run dev
+# Frontend: http://localhost:5173
+```
+
+✅ **Готово!** Откройте http://localhost:5173 в Telegram WebApp или браузере.
+
+### 5. Тестирование
+
+```
+# 1. Создать тестовый рынок (Admin Panel)
+# 2. Сделать депозит (укажите tx_hash)
+# 3. Поставить на рынок
+# 4. Запросить выплату → mock signer отправит автоматически!
 ```
 
 ### Конфигурация
