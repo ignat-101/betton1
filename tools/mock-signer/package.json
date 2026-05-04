@@ -6,7 +6,7 @@
   "scripts": {
 "dev":"ts-node --transpile-only --skipProject true index.ts",
     "build": "tsc",
-"start":"node index.js"
+"start":"node dist/index.js"
   },
   "dependencies": {
     "@ton/ton": "^13.5.1",
