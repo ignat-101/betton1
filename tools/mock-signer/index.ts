@@ -24,7 +24,7 @@ async function initSigner() {
   const wordsArray = PRIVATE_KEY_MNEMONIC.trim().split(/\\s+/);
   keyPair = await mnemonicToPrivateKey(wordsArray.length === 1 ? [PRIVATE_KEY_MNEMONIC] : wordsArray);
   
-  wallet = WalletContractV4R2.create({ 
+  wallet = WalletContractV4.create({ 
     workchain: 0, 
     publicKey: keyPair.publicKey 
   });
